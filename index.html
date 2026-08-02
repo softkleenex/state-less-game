@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="브라우저 상태를 읽고 AI가 만든 단 하나의 거짓 기억을 지우는 메타 퍼즐 게임"
+    />
+    <meta name="theme-color" content="#070a12" />
+    <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+    <title>STATE//LESS — 이 페이지는 당신을 기억한다</title>
+  </head>
+  <body>
+    <a class="skip-link" href="#game-shell">게임으로 바로가기</a>
+
+    <div class="ambient-grid" aria-hidden="true"></div>
+    <div class="ambient-glow" aria-hidden="true"></div>
+
+    <header class="topbar">
+      <a class="wordmark" href="./" aria-label="STATE LESS 처음 화면">
+        <span class="wordmark-mark" aria-hidden="true">S/L</span>
+        <span>STATE//LESS</span>
+      </a>
+
+      <div class="system-flags" aria-label="시스템 상태">
+        <span class="system-flag">
+          <span class="status-dot" aria-hidden="true"></span>
+          LOCAL AI
+        </span>
+        <span class="system-flag" id="storage-api-label">COOKIE: SCANNING</span>
+        <button class="icon-button" id="sound-button" type="button" aria-pressed="true">
+          <span aria-hidden="true" id="sound-icon">◖))</span>
+          <span class="button-label" id="sound-label">소리 켜짐</span>
+        </button>
+      </div>
+    </header>
+
+    <main class="page-shell" id="game-shell">
+      <section class="intro-copy" aria-labelledby="game-title">
+        <p class="eyebrow">BROWSER MEMORY AUDIT / 2026</p>
+        <h1 id="game-title">
+          이 페이지는<br />
+          <span>당신을<br />기억한다.</span>
+        </h1>
+        <p class="lede">
+          HTTP는 무상태라고 배웠습니다. 그런데 이 작은 AI는 쿠키 속 기억으로
+          당신에 관한 문장을 만듭니다. 세 문장 중 단 하나의 거짓을 찾아 지우세요.
+        </p>
+
+        <dl class="telemetry" id="telemetry-list" aria-label="현재 브라우저 텔레메트리">
+          <div class="telemetry-row">
+            <dt>VISIT</dt>
+            <dd id="telemetry-visit">—</dd>
+          </div>
+          <div class="telemetry-row">
+            <dt>THEME</dt>
+            <dd id="telemetry-theme">—</dd>
+          </div>
+          <div class="telemetry-row">
+            <dt>TIME</dt>
+            <dd id="telemetry-time">—</dd>
+          </div>
+          <div class="telemetry-row">
+            <dt>INPUT</dt>
+            <dd id="telemetry-input">UNKNOWN</dd>
+          </div>
+          <div class="telemetry-row">
+            <dt>TAB TRACE</dt>
+            <dd id="telemetry-tab">CLEAN</dd>
+          </div>
+          <div class="telemetry-row">
+            <dt>OTHER SELF</dt>
+            <dd id="telemetry-peer">NONE</dd>
+          </div>
+        </dl>
+
+        <div class="technology-note">
+          <span>LIVE STACK</span>
+          <p>PRETEXT · COOKIE STORE · VIEW TRANSITION · BROADCAST CHANNEL</p>
+        </div>
+      </section>
+
+      <section class="game-panel" aria-label="STATE LESS 게임">
+        <div class="game-panel-header">
+          <div>
+            <span class="micro-label">INFERENCE TERMINAL</span>
+            <strong id="terminal-status">BOOT SEQUENCE</strong>
+          </div>
+          <span class="session-code" id="session-code">SESSION ----</span>
+        </div>
+
+        <div class="screen-stack" id="screen-stack">
+          <section class="screen intro-screen is-active" id="intro-screen" aria-labelledby="intro-heading">
+            <div class="ai-orb" aria-hidden="true">
+              <span></span><span></span><span></span>
+            </div>
+            <p class="speaker-label">LOCAL INFERENCE / HELLO</p>
+            <h2 id="intro-heading">아직 당신을 모릅니다.</h2>
+            <p class="screen-copy" id="intro-message">
+              이 게임이 만든 방문 횟수와 결말만 쿠키에 저장합니다. 추적 코드도,
+              개인정보도 없습니다.
+            </p>
+
+            <div class="memory-choice" id="first-visit-actions">
+              <button class="choice-button" type="button" data-memory-policy="session">
+                <span class="choice-index">01</span>
+                <span>
+                  <strong>이번 탭만 기억</strong>
+                  <small>브라우저를 닫으면 사라지는 세션 쿠키</small>
+                </span>
+              </button>
+              <button class="choice-button choice-button-primary" type="button" data-memory-policy="persistent">
+                <span class="choice-index">02</span>
+                <span>
+                  <strong>7일 동안 기억</strong>
+                  <small>재방문 대사와 이전 결말이 이어집니다</small>
+                </span>
+              </button>
+            </div>
+
+            <button class="primary-button" id="return-start-button" type="button" hidden>
+              기억 검사 다시 시작
+              <span aria-hidden="true">↗</span>
+            </button>
+
+            <p class="input-hint">
+              <kbd>←</kbd><kbd>→</kbd> 선택 · <kbd>Space</kbd>/<kbd>Enter</kbd> 확인
+              <span>또는 마우스로 클릭</span>
+            </p>
+          </section>
+
+          <section class="screen game-screen" id="play-screen" aria-labelledby="round-heading" hidden>
+            <header class="round-header">
+              <div>
+                <span class="micro-label" id="round-kicker">MEMORY PACKET 01/06</span>
+                <h2 id="round-heading">거짓 기억 하나를 지우세요.</h2>
+              </div>
+              <div class="score-block">
+                <span>SCORE</span>
+                <strong id="score-value">00000</strong>
+              </div>
+            </header>
+
+            <div class="integrity-line">
+              <span>MEMORY INTEGRITY</span>
+              <div class="integrity-pips" id="integrity-pips" aria-label="기억 무결성 3">
+                <i></i><i></i><i></i>
+              </div>
+            </div>
+
+            <div class="round-context" id="round-context" aria-label="이번 문제의 실제 브라우저 상태"></div>
+
+            <div
+              class="statement-board"
+              id="statement-board"
+              role="group"
+              aria-label="AI가 추론한 세 개의 기억 문장"
+              aria-describedby="board-instruction"
+            ></div>
+
+            <div class="scan-track" aria-hidden="true">
+              <span id="scan-progress"></span>
+            </div>
+            <div class="board-footer">
+              <p id="board-instruction">실제 상태와 다른 문장을 선택하세요.</p>
+              <output id="layout-readout">PRETEXT · WAITING</output>
+            </div>
+            <p class="round-feedback" id="round-feedback" aria-live="polite"></p>
+          </section>
+
+          <section class="screen result-screen" id="result-screen" aria-labelledby="result-heading" hidden>
+            <p class="speaker-label" id="result-kicker">AUDIT COMPLETE</p>
+            <div class="result-glyph" id="result-glyph" aria-hidden="true">∴</div>
+            <h2 id="result-heading">기억이 정리되었습니다.</h2>
+            <p class="screen-copy" id="result-message"></p>
+
+            <dl class="result-stats">
+              <div><dt>SCORE</dt><dd id="result-score">00000</dd></div>
+              <div><dt>RANK</dt><dd id="result-rank">—</dd></div>
+              <div><dt>TRUTH</dt><dd id="result-truth">0/6</dd></div>
+            </dl>
+
+            <div class="result-actions">
+              <button class="primary-button" id="remember-button" type="button">
+                이 결말을 기억하고 다시
+                <span aria-hidden="true">↗</span>
+              </button>
+              <button class="text-button" id="forget-button" type="button">
+                쿠키를 지우고 처음으로
+              </button>
+            </div>
+          </section>
+        </div>
+
+        <footer class="game-panel-footer">
+          <span id="runtime-note">CLIENT-SIDE ONLY</span>
+          <span>NO PERSONAL DATA · NO EXTERNAL AI CALL</span>
+        </footer>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <p>모든 그래픽과 사운드는 브라우저에서 실시간 생성됩니다.</p>
+      <p>STATE//LESS <span aria-hidden="true">©</span> 2026</p>
+    </footer>
+
+    <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+    <div class="sr-only" id="announcer" aria-live="assertive"></div>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
