@@ -182,7 +182,7 @@
             <header class="round-header">
               <div class="round-heading-copy">
                 <span class="micro-label" id="round-kicker">MEMORY PUZZLE 01/06</span>
-                <h2 id="round-heading">브라우저 흔적을 복구하세요.</h2>
+                <h2 id="round-heading">지금 진짜인 신호를 고르세요.</h2>
                 <p class="mori-dialogue">
                   <span aria-hidden="true">MORI //</span>
                   <span id="mori-dialogue">신호는 솔직해. 해석하는 쪽이 자꾸 거짓말할 뿐이지.</span>
@@ -298,6 +298,14 @@
               aria-describedby="evidence-summary board-instruction"
             ></div>
 
+            <div class="lock-meter" id="lock-meter" hidden aria-hidden="true">
+              <p class="lock-meter-hint" id="lock-meter-hint">지금 다시 눌러 SIGNAL LOCK 하세요.</p>
+              <div class="lock-meter-track">
+                <span class="lock-meter-target" id="lock-meter-target"></span>
+                <span class="lock-meter-marker" id="lock-meter-marker"></span>
+              </div>
+            </div>
+
             <div class="round-impact" id="round-impact" data-state="idle" aria-hidden="true">
               <span class="round-impact-portrait">
                 <img
@@ -320,7 +328,7 @@
               <span id="scan-progress"></span>
             </div>
             <div class="board-footer">
-              <p id="board-instruction">현재 규칙과 증거에 맞는 선택지를 고르세요.</p>
+              <p id="board-instruction">아래 후보 중 하나를 고르고, 확정 순간에 맞춰 SIGNAL LOCK 하세요.</p>
               <output id="layout-readout">PRETEXT · WAITING</output>
             </div>
             <div class="round-resolution">

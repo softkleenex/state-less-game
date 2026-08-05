@@ -3,6 +3,9 @@ import "./styles.css";
 import { AudioEngine } from "./audio.js";
 import {
   DEEP_VERIFY_BONUS,
+  LOCK_DEEP_VERIFY_TARGET_SCALE,
+  LOCK_SWEEP_PERIOD_MS,
+  LOCK_TARGET_WIDTH_RATIO,
   MAX_INTEGRITY,
   MAX_MEMORY_FRAGMENTS,
   SYNC_RECOVERY_STREAK,
@@ -22,6 +25,8 @@ import {
   getRunDirectiveStatus,
   getSyncRecoveryIndex,
   getWrongAnswerIntegrityLoss,
+  precisionMultiplierFor,
+  resolveLockPrecision,
   scoreCorrectAnswer,
   seedFromString,
 } from "./game-logic.js";
@@ -101,6 +106,10 @@ const elements = {
   deepVerifyLabel: element("deep-verify-label"),
   statementBoard: element("statement-board"),
   scanProgress: element("scan-progress"),
+  lockMeter: element("lock-meter"),
+  lockMeterHint: element("lock-meter-hint"),
+  lockMeterTarget: element("lock-meter-target"),
+  lockMeterMarker: element("lock-meter-marker"),
   layoutReadout: element("layout-readout"),
   boardInstruction: element("board-instruction"),
   roundFeedback: element("round-feedback"),
@@ -172,6 +181,13 @@ const runtime = {
   lensMaxCharges: 1,
   lensUsedRoundIndex: -1,
   locked: false,
+  lockPhase: false,
+  lockPendingIndex: -1,
+  lockStartedAt: 0,
+  lockTargetStart: 0,
+  lockTargetWidth: LOCK_TARGET_WIDTH_RATIO,
+  lockLastRatio: 0,
+  lockAnimationFrame: 0,
   lastFrameAt: 0,
   animationFrame: 0,
   advanceTimer: 0,
@@ -902,7 +918,13 @@ function renderStatementButtons(round) {
     button.setAttribute("aria-label", `선택지 ${index + 1}. ${statement.text}`);
     button.tabIndex = index === 0 ? 0 : -1;
     button.addEventListener("pointerenter", () => selectStatement(index, false));
-    button.addEventListener("click", () => submitAnswer(index));
+    button.addEventListener("click", () => {
+      if (runtime.lockPhase) {
+        resolveLock();
+        return;
+      }
+      beginLock(index);
+    });
     fragment.append(button);
   });
   elements.statementBoard.replaceChildren(fragment);
@@ -1150,8 +1172,83 @@ function updateRoundClock(timestamp) {
   runtime.animationFrame = window.requestAnimationFrame(updateRoundClock);
 }
 
-function submitAnswer(index, timedOut = false) {
+function lockMarkerRatioAt(timestamp) {
+  const elapsed = (timestamp - runtime.lockStartedAt) % (LOCK_SWEEP_PERIOD_MS * 2);
+  const phase = elapsed / LOCK_SWEEP_PERIOD_MS;
+  return phase <= 1 ? phase : 2 - phase;
+}
+
+function cancelLockPhase() {
+  if (!runtime.lockPhase) return;
+  runtime.lockPhase = false;
+  window.cancelAnimationFrame(runtime.lockAnimationFrame);
+  elements.lockMeter.hidden = true;
+  const buttons = [...elements.statementBoard.querySelectorAll(".statement-chip")];
+  buttons.forEach((button) => {
+    button.disabled = false;
+    button.classList.remove("is-locking", "is-muted");
+  });
+}
+
+function updateLockMarker(timestamp) {
+  if (!runtime.lockPhase) return;
+  runtime.lockLastRatio = lockMarkerRatioAt(timestamp);
+  elements.lockMeterMarker.style.left = `${runtime.lockLastRatio * 100}%`;
+  runtime.lockAnimationFrame = window.requestAnimationFrame(updateLockMarker);
+}
+
+function beginLock(index) {
+  if (runtime.mode !== "play" || runtime.locked || runtime.lockPhase) return;
+  if (index < 0) return;
+  const buttons = [...elements.statementBoard.querySelectorAll(".statement-chip")];
+  if (!buttons[index] || buttons[index].disabled) return;
+
+  if (reducedMotionQuery.matches) {
+    submitAnswer(index, false, "good");
+    return;
+  }
+
+  runtime.lockPhase = true;
+  runtime.lockPendingIndex = index;
+  runtime.lockStartedAt = performance.now();
+  const targetWidth = runtime.deepVerifyActive
+    ? LOCK_TARGET_WIDTH_RATIO * LOCK_DEEP_VERIFY_TARGET_SCALE
+    : LOCK_TARGET_WIDTH_RATIO;
+  runtime.lockTargetWidth = targetWidth;
+  runtime.lockTargetStart = Math.random() * (1 - targetWidth);
+  elements.lockMeterTarget.style.left = `${runtime.lockTargetStart * 100}%`;
+  elements.lockMeterTarget.style.width = `${targetWidth * 100}%`;
+  elements.lockMeterMarker.style.left = "0%";
+  elements.lockMeter.hidden = false;
+  elements.lockMeterHint.textContent = runtime.inputMode === "keyboard"
+    ? "지금 Space/Enter를 다시 눌러 SIGNAL LOCK 하세요."
+    : "지금 다시 클릭해 SIGNAL LOCK 하세요.";
+  elements.boardInstruction.textContent = "타이밍에 맞춰 같은 방식으로 다시 확정하세요.";
+  buttons.forEach((button, buttonIndex) => {
+    if (buttonIndex !== index) {
+      button.disabled = true;
+      button.classList.add("is-muted");
+    } else {
+      button.classList.add("is-locking");
+    }
+  });
+  runtime.lockAnimationFrame = window.requestAnimationFrame(updateLockMarker);
+}
+
+function resolveLock() {
+  if (!runtime.lockPhase) return;
+  const index = runtime.lockPendingIndex;
+  const precision = resolveLockPrecision(
+    runtime.lockLastRatio ?? 0,
+    runtime.lockTargetStart,
+    runtime.lockTargetWidth,
+  );
+  submitAnswer(index, false, precision);
+}
+
+function submitAnswer(index, timedOut = false, precision = "good") {
   if (runtime.mode !== "play" || runtime.locked) return;
+  cancelLockPhase();
   runtime.locked = true;
   window.cancelAnimationFrame(runtime.animationFrame);
 
@@ -1182,6 +1279,7 @@ function submitAnswer(index, timedOut = false) {
       runtime.streak,
       deepVerify,
       deepVerifyBonus,
+      precisionMultiplierFor(precision),
     );
     const recoveredRoundIndex = getSyncRecoveryIndex({
       outcomes: runtime.outcomes,
@@ -1207,7 +1305,12 @@ function submitAnswer(index, timedOut = false) {
     const recoveryNotice = recoveredRoundIndex >= 0
       ? ` · SYNC RECOVERY로 라운드 ${recoveredRoundNumber} 복구`
       : "";
-    elements.roundFeedback.textContent = `${finalCore ? "FINAL CORE · " : ""}${round.successText} · +${awardedPoints}${wagerNotice}${syncNotice}${directiveNotice}${recoveryNotice} · ${round.explanation}`;
+    const lockNotice = precision === "perfect"
+      ? " · PERFECT LOCK"
+      : precision === "miss"
+        ? " · 확정이 흔들려 보상 절반"
+        : "";
+    elements.roundFeedback.textContent = `${finalCore ? "FINAL CORE · " : ""}${round.successText} · +${awardedPoints}${lockNotice}${wagerNotice}${syncNotice}${directiveNotice}${recoveryNotice} · ${round.explanation}`;
     elements.roundFeedback.className = "round-feedback is-positive";
     audio.correct(runtime.streak);
     setMoriState(recoveredRoundIndex >= 0
@@ -1227,14 +1330,19 @@ function submitAnswer(index, timedOut = false) {
       `+${awardedPoints}`,
       recoveredRoundIndex >= 0
         ? `R${recoveredRoundNumber} RESTORED${deepVerify ? ` · WAGER +${deepVerifyBonus}` : ""}${directiveDetail}`
-        : `${finalCore ? "FINAL CORE · " : ""}${deepVerify ? `WAGER +${deepVerifyBonus} · ` : ""}CHAIN ×${runtime.streak}${directiveDetail} · ${elements.roundTime.textContent} SEC`,
+        : `${finalCore ? "FINAL CORE · " : ""}${deepVerify ? `WAGER +${deepVerifyBonus} · ` : ""}CHAIN ×${runtime.streak}${lockNotice}${directiveDetail} · ${elements.roundTime.textContent} SEC`,
     );
     const directiveAnnouncement = directiveBonus
       ? ` MORI REQUEST를 완료해 ${directiveBonus}점을 추가로 획득했습니다.`
       : "";
+    const lockAnnouncement = precision === "perfect"
+      ? " SIGNAL LOCK 완벽하게 맞췄습니다."
+      : precision === "miss"
+        ? " SIGNAL LOCK 타이밍이 빗나가 보상이 절반으로 줄었습니다."
+        : "";
     announce(recoveredRoundIndex >= 0
-      ? `정답입니다. ${points}점을 획득했습니다.${deepVerify ? ` DEEP VERIFY 추가 점수 ${deepVerifyBonus}점.` : ""}${directiveAnnouncement} 3연속 정답으로 ${recoveredRoundIndex + 1}번째 오류를 복구하고 기억 무결성 1칸을 회복했습니다. ${round.explanation}`
-      : `${finalCore ? "마지막 코어를 봉인했습니다. " : "정답입니다. "}${points}점을 획득했습니다.${deepVerify ? ` DEEP VERIFY 추가 점수 ${deepVerifyBonus}점.` : ""}${directiveAnnouncement} 연속 정답 ${runtime.streak}. ${round.explanation}`);
+      ? `정답입니다. ${points}점을 획득했습니다.${lockAnnouncement}${deepVerify ? ` DEEP VERIFY 추가 점수 ${deepVerifyBonus}점.` : ""}${directiveAnnouncement} 3연속 정답으로 ${recoveredRoundIndex + 1}번째 오류를 복구하고 기억 무결성 1칸을 회복했습니다. ${round.explanation}`
+      : `${finalCore ? "마지막 코어를 봉인했습니다. " : "정답입니다. "}${points}점을 획득했습니다.${lockAnnouncement}${deepVerify ? ` DEEP VERIFY 추가 점수 ${deepVerifyBonus}점.` : ""}${directiveAnnouncement} 연속 정답 ${runtime.streak}. ${round.explanation}`);
   } else {
     runtime.outcomes[runtime.roundIndex] = timedOut ? "timeout" : "wrong";
     runtime.streak = 0;
@@ -1498,7 +1606,18 @@ function handleGlobalKeydown(event) {
     return;
   }
 
-  if (runtime.mode === "play" && !runtime.locked) {
+  if (
+    runtime.mode === "play"
+    && runtime.lockPhase
+    && (event.key === " " || event.key === "Enter")
+    && !event.target.closest("#sound-button, #lens-button")
+  ) {
+    event.preventDefault();
+    if (!event.repeat) resolveLock();
+    return;
+  }
+
+  if (runtime.mode === "play" && !runtime.locked && !runtime.lockPhase) {
     if (event.key.toLowerCase() === "d") {
       event.preventDefault();
       if (!event.repeat) toggleDeepVerify();
@@ -1521,7 +1640,7 @@ function handleGlobalKeydown(event) {
       && !event.target.closest("#sound-button, #lens-button")
     ) {
       event.preventDefault();
-      submitAnswer(runtime.selectedIndex);
+      beginLock(runtime.selectedIndex);
     }
     return;
   }

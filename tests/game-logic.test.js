@@ -24,6 +24,8 @@ import {
   getRunDirectiveStatus,
   getSyncRecoveryIndex,
   getWrongAnswerIntegrityLoss,
+  precisionMultiplierFor,
+  resolveLockPrecision,
   scoreCorrectAnswer,
   seedFromString,
 } from "../src/game-logic.js";
@@ -254,6 +256,21 @@ test("score rewards remaining time and streak without exceeding its cap", () => 
   assert.equal(scoreCorrectAnswer(0, 0), 500);
   assert.equal(scoreCorrectAnswer(1, 1), 1_060);
   assert.equal(scoreCorrectAnswer(1.5, 99), 1_300);
+});
+
+test("signal lock precision multiplier scales the same base score", () => {
+  assert.equal(scoreCorrectAnswer(0, 0, false, undefined, 1), 500);
+  assert.equal(scoreCorrectAnswer(0, 0, false, undefined, precisionMultiplierFor("perfect")), 600);
+  assert.equal(scoreCorrectAnswer(0, 0, false, undefined, precisionMultiplierFor("miss")), 250);
+  assert.equal(precisionMultiplierFor("good"), 1);
+});
+
+test("lock precision resolves perfect, good, and miss from marker position", () => {
+  assert.equal(resolveLockPrecision(0.5, 0.4, 0.2), "perfect");
+  assert.equal(resolveLockPrecision(0.42, 0.4, 0.2), "good");
+  assert.equal(resolveLockPrecision(0.6, 0.4, 0.2), "good");
+  assert.equal(resolveLockPrecision(0.3, 0.4, 0.2), "miss");
+  assert.equal(resolveLockPrecision(0.61, 0.4, 0.2), "miss");
 });
 
 test("deep verify adds a base wager and doubles an error's integrity loss", () => {

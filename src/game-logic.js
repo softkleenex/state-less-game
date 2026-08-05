@@ -9,6 +9,18 @@ export const DEEP_VERIFY_INTEGRITY_LOSS = 2;
 export const FINAL_CORE_DEEP_VERIFY_BONUS = DEEP_VERIFY_BONUS * 2;
 export const RUN_DIRECTIVE_BONUS = 600;
 
+export const LOCK_SWEEP_PERIOD_MS = 1_100;
+export const LOCK_TARGET_WIDTH_RATIO = 0.32;
+export const LOCK_PERFECT_WIDTH_RATIO = 0.34;
+export const LOCK_DEEP_VERIFY_TARGET_SCALE = 0.6;
+export const LOCK_PERFECT_MULTIPLIER = 1.2;
+export const LOCK_MISS_MULTIPLIER = 0.5;
+
+export const PLAY_INSTRUCTION = {
+  prompt: "지금 진짜인 신호를 고르세요.",
+  instruction: "아래 후보 중 하나를 고르고, 확정 순간에 맞춰 SIGNAL LOCK 하세요.",
+};
+
 const ROUND_TYPE_SEQUENCE = [
   "trace",
   "purge",
@@ -48,43 +60,31 @@ const COMPLEX_ROUND_BONUS_MS = {
 const ROUND_COPY = {
   purge: {
     kicker: "CORRUPTION HUNT",
-    prompt: "충돌한 기억 하나를 지우세요.",
-    instruction: "세 개의 흔적을 교차해 거짓 기억을 고르세요.",
     successText: "거짓 제거 완료",
     failureText: "진실을 지웠습니다",
   },
   trace: {
     kicker: "TRACE DECODE",
-    prompt: "이 신호의 의미를 해석하세요.",
-    instruction: "브라우저 흔적과 정확히 일치하는 해석을 고르세요.",
     successText: "신호 해독 완료",
     failureText: "신호 해석에 실패했습니다",
   },
   restore: {
     kicker: "MEMORY RESTORE",
-    prompt: "살아남은 진실 하나를 복구하세요.",
-    instruction: "오염된 두 문장 사이에서 실제 기록을 고르세요.",
     successText: "진실 복구 완료",
     failureText: "오염된 기억을 복구했습니다",
   },
   redact: {
     kicker: "REDACTION FILL",
-    prompt: "가려진 색인 값을 복원하세요.",
-    instruction: "원본 신호를 읽고 대괄호 필드에 들어갈 값을 고르세요.",
     successText: "색인 값 복원 완료",
     failureText: "잘못된 값을 색인했습니다",
   },
   crosscheck: {
     kicker: "DOUBLE ENTRY",
-    prompt: "두 기록을 동시에 만족시키세요.",
-    instruction: "TRACE A와 TRACE B에 모두 맞는 필드 쌍을 고르세요.",
     successText: "교차 검증 완료",
     failureText: "한쪽 기록과 어긋났습니다",
   },
   checksum: {
     kicker: "CHECKSUM AUDIT",
-    prompt: "오염된 필드 수를 계산하세요.",
-    instruction: "세 CHECK에서 신호와 오른쪽 후보 값이 다른 횟수를 세세요.",
     successText: "체크섬 검증 완료",
     failureText: "오염 개수를 잘못 계산했습니다",
   },
@@ -501,6 +501,7 @@ export function createRoundDeck(catalog, totalRounds, seed) {
       id: roundIndex + 1,
       kind,
       ...copy,
+      ...PLAY_INSTRUCTION,
       evidence,
       explanation,
       statements: shuffle(statements, random),
@@ -521,11 +522,32 @@ export function scoreCorrectAnswer(
   streak,
   deepVerify = false,
   deepVerifyBonus = DEEP_VERIFY_BONUS,
+  precisionMultiplier = 1,
 ) {
   const speedBonus = Math.round(clamp(remainingRatio, 0, 1) * 500);
   const streakBonus = clamp(streak, 0, 5) * 60;
   const wagerBonus = deepVerify ? deepVerifyBonus : 0;
-  return 500 + speedBonus + streakBonus + wagerBonus;
+  return Math.round((500 + speedBonus + streakBonus + wagerBonus) * precisionMultiplier);
+}
+
+export function resolveLockPrecision(
+  markerRatio,
+  targetStart,
+  targetWidth,
+  perfectWidth = LOCK_PERFECT_WIDTH_RATIO,
+) {
+  const targetEnd = targetStart + targetWidth;
+  if (markerRatio < targetStart || markerRatio > targetEnd) return "miss";
+  const targetCenter = targetStart + targetWidth / 2;
+  const perfectStart = targetCenter - (targetWidth * perfectWidth) / 2;
+  const perfectEnd = targetCenter + (targetWidth * perfectWidth) / 2;
+  return markerRatio >= perfectStart && markerRatio <= perfectEnd ? "perfect" : "good";
+}
+
+export function precisionMultiplierFor(precision) {
+  if (precision === "perfect") return LOCK_PERFECT_MULTIPLIER;
+  if (precision === "miss") return LOCK_MISS_MULTIPLIER;
+  return 1;
 }
 
 export function getWrongAnswerIntegrityLoss(deepVerify = false) {

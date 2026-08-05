@@ -1920,6 +1920,16 @@ kbd {
   color: var(--amber-300);
 }
 
+.statement-chip.is-locking {
+  z-index: 3;
+  border-color: var(--amber-300);
+  border-left-color: var(--amber-300);
+  color: var(--slate-100);
+  background: color-mix(in srgb, var(--amber-300) 12%, var(--slate-900));
+  transform: translate(-2px, -2px);
+  animation: pressure-pulse 620ms ease-in-out infinite;
+}
+
 .scan-track {
   height: 3px;
   margin-top: 18px;
@@ -1935,6 +1945,50 @@ kbd {
   transform-origin: left;
   background: linear-gradient(90deg, var(--cyan-400), var(--amber-300));
   box-shadow: 0 0 12px rgb(34 211 238 / 35%);
+}
+
+.lock-meter {
+  margin-top: 18px;
+  padding: 10px 12px;
+  border: 1px solid var(--amber-300);
+  border-left: 3px solid var(--amber-300);
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--amber-300) 7%, var(--slate-950));
+}
+
+.lock-meter-hint {
+  margin: 0 0 8px;
+  color: var(--amber-300);
+  font: 700 0.62rem/1 "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.lock-meter-track {
+  position: relative;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--slate-800);
+  overflow: hidden;
+}
+
+.lock-meter-target {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  background: color-mix(in srgb, var(--success) 55%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--success) 70%, transparent);
+}
+
+.lock-meter-marker {
+  position: absolute;
+  top: -3px;
+  width: 3px;
+  height: 16px;
+  transform: translateX(-50%);
+  background: var(--slate-100);
+  box-shadow: 0 0 8px var(--cyan-300);
+  border-radius: 999px;
 }
 
 .board-footer {
