@@ -67,6 +67,22 @@ export class AudioEngine {
     this.#tone(180, 0.24, { type: "sawtooth", volume: 0.028, endFrequency: 78 });
   }
 
+  warning() {
+    this.#tone(196, 0.09, { type: "square", volume: 0.016, endFrequency: 165 });
+    this.#tone(165, 0.12, { delay: 0.13, type: "square", volume: 0.014, endFrequency: 139 });
+  }
+
+  core() {
+    [196, 294, 440].forEach((frequency, index) => {
+      this.#tone(frequency, 0.2, {
+        delay: index * 0.085,
+        type: index === 2 ? "triangle" : "sine",
+        volume: 0.024,
+        endFrequency: frequency * 1.06,
+      });
+    });
+  }
+
   finish(success) {
     const notes = success ? [262, 392, 523] : [220, 165, 110];
     notes.forEach((frequency, index) => {

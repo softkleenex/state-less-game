@@ -5,10 +5,17 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta
       name="description"
-      content="브라우저 상태를 읽고 AI가 만든 단 하나의 거짓 기억을 지우는 메타 퍼즐 게임"
+      content="브라우저 흔적을 해석하고 MORI의 기억 조각을 복구하는 상태 기반 메타 퍼즐 게임"
     />
     <meta name="theme-color" content="#070a12" />
     <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+    <link
+      rel="preload"
+      href="./fonts/jetbrains-mono-variable.woff2"
+      as="font"
+      type="font/woff2"
+      crossorigin
+    />
     <title>STATE//LESS — 이 페이지는 당신을 기억한다</title>
   </head>
   <body>
@@ -26,7 +33,7 @@
       <div class="system-flags" aria-label="시스템 상태">
         <span class="system-flag">
           <span class="status-dot" aria-hidden="true"></span>
-          LOCAL AI
+          LOCAL DAEMON
         </span>
         <span class="system-flag" id="storage-api-label">COOKIE: SCANNING</span>
         <button class="icon-button" id="sound-button" type="button" aria-pressed="true">
@@ -38,14 +45,14 @@
 
     <main class="page-shell" id="game-shell">
       <section class="intro-copy" aria-labelledby="game-title">
-        <p class="eyebrow">BROWSER MEMORY AUDIT / 2026</p>
+        <p class="eyebrow">MEMORY:// LOCAL ARCHIVE / 2026</p>
         <h1 id="game-title">
           이 페이지는<br />
           <span>당신을<br />기억한다.</span>
         </h1>
         <p class="lede">
-          HTTP는 무상태라고 배웠습니다. 그런데 이 작은 AI는 쿠키 속 기억으로
-          당신에 관한 문장을 만듭니다. 세 문장 중 단 하나의 거짓을 찾아 지우세요.
+          이 출처의 로컬 일지에서 깨어난 기억 사서 MORI. 브라우저가 남긴
+          흔적을 판독하고, 다음 방문까지 이어지는 여섯 장의 색인을 완성하세요.
         </p>
 
         <dl class="telemetry" id="telemetry-list" aria-label="현재 브라우저 텔레메트리">
@@ -54,29 +61,29 @@
             <dd id="telemetry-visit">—</dd>
           </div>
           <div class="telemetry-row">
-            <dt>THEME</dt>
-            <dd id="telemetry-theme">—</dd>
+            <dt>SHARDS</dt>
+            <dd id="telemetry-fragments">0 / 6</dd>
           </div>
           <div class="telemetry-row">
-            <dt>TIME</dt>
-            <dd id="telemetry-time">—</dd>
+            <dt>RUNS</dt>
+            <dd id="telemetry-runs">00</dd>
           </div>
           <div class="telemetry-row">
-            <dt>INPUT</dt>
-            <dd id="telemetry-input">UNKNOWN</dd>
+            <dt>BEST</dt>
+            <dd id="telemetry-best">00000</dd>
           </div>
           <div class="telemetry-row">
-            <dt>TAB TRACE</dt>
-            <dd id="telemetry-tab">CLEAN</dd>
+            <dt>LAST END</dt>
+            <dd id="telemetry-ending">NONE</dd>
           </div>
           <div class="telemetry-row">
-            <dt>OTHER SELF</dt>
-            <dd id="telemetry-peer">NONE</dd>
+            <dt>NEXT TRACE</dt>
+            <dd id="telemetry-unlock">01 / 06</dd>
           </div>
         </dl>
 
         <div class="technology-note">
-          <span>LIVE STACK</span>
+          <span>WEB-NATIVE ENGINE</span>
           <p>PRETEXT · COOKIE STORE · VIEW TRANSITION · BROADCAST CHANNEL</p>
         </div>
       </section>
@@ -84,23 +91,64 @@
       <section class="game-panel" aria-label="STATE LESS 게임">
         <div class="game-panel-header">
           <div>
-            <span class="micro-label">INFERENCE TERMINAL</span>
+            <span class="micro-label">LOCAL MEMORY ARCHIVE</span>
             <strong id="terminal-status">BOOT SEQUENCE</strong>
           </div>
           <span class="session-code" id="session-code">SESSION ----</span>
         </div>
 
-        <div class="screen-stack" id="screen-stack">
+        <div class="memory-location" aria-label="현재 로컬 기억 경로">
+          <span class="memory-tab" aria-current="page">mori.memory</span>
+          <p class="memory-address">
+            <span aria-hidden="true">◇</span>
+            <span class="memory-scheme">memory://local/</span><strong id="memory-route">boot</strong>
+          </p>
+          <span class="memory-scope">THIS ORIGIN ONLY</span>
+        </div>
+
+        <div class="screen-stack" id="screen-stack" data-screen="intro">
+          <figure class="mori-presence" id="mori-presence" data-character-state="boot-empty" aria-hidden="true">
+            <img
+              src="./mori/mori-full.webp"
+              width="1024"
+              height="1536"
+              alt=""
+              decoding="async"
+              fetchpriority="high"
+            />
+            <figcaption id="mori-presence-label">MORI // FILE 00</figcaption>
+          </figure>
+
           <section class="screen intro-screen is-active" id="intro-screen" aria-labelledby="intro-heading">
             <div class="ai-orb" aria-hidden="true">
               <span></span><span></span><span></span>
             </div>
-            <p class="speaker-label">LOCAL INFERENCE / HELLO</p>
+            <p class="speaker-label">MORI / ARCHIVE KEEPER</p>
             <h2 id="intro-heading">아직 당신을 모릅니다.</h2>
             <p class="screen-copy" id="intro-message">
-              이 게임이 만든 방문 횟수와 결말만 쿠키에 저장합니다. 추적 코드도,
+              이 게임은 방문 횟수와 결말만 쿠키에 저장합니다. 추적 코드도,
               개인정보도 없습니다.
             </p>
+
+            <p class="mission-brief" id="mission-brief" data-state="next">
+              <span class="mission-label" id="mission-brief-label">NEXT FILE</span>
+              <span class="mission-copy" id="mission-brief-copy">
+                여섯 번의 감사 중 다섯 번 이상 성공하면 다음 MORI 파일이 열립니다.
+              </span>
+              <span class="mission-directive" id="intro-directive">
+                <span>MORI REQUEST</span>
+                <strong id="intro-directive-copy">SYNC CHAIN · 연속 정답 4회 달성</strong>
+                <small id="intro-directive-reward">+600</small>
+              </span>
+            </p>
+
+            <details class="archive-log" id="archive-log" hidden>
+              <summary>
+                <span>RECOVERED MORI FILES</span>
+                <strong id="archive-log-count">00 / 06</strong>
+              </summary>
+              <ol id="archive-log-list"></ol>
+            </details>
 
             <div class="memory-choice" id="first-visit-actions">
               <button class="choice-button" type="button" data-memory-policy="session">
@@ -120,7 +168,7 @@
             </div>
 
             <button class="primary-button" id="return-start-button" type="button" hidden>
-              기억 검사 다시 시작
+              <span id="return-start-label">기억 검사 다시 시작</span>
               <span aria-hidden="true">↗</span>
             </button>
 
@@ -132,58 +180,192 @@
 
           <section class="screen game-screen" id="play-screen" aria-labelledby="round-heading" hidden>
             <header class="round-header">
-              <div>
-                <span class="micro-label" id="round-kicker">MEMORY PACKET 01/06</span>
-                <h2 id="round-heading">거짓 기억 하나를 지우세요.</h2>
+              <div class="round-heading-copy">
+                <span class="micro-label" id="round-kicker">MEMORY PUZZLE 01/06</span>
+                <h2 id="round-heading">브라우저 흔적을 복구하세요.</h2>
+                <p class="mori-dialogue">
+                  <span aria-hidden="true">MORI //</span>
+                  <span id="mori-dialogue">신호는 솔직해. 해석하는 쪽이 자꾸 거짓말할 뿐이지.</span>
+                </p>
               </div>
-              <div class="score-block">
-                <span>SCORE</span>
-                <strong id="score-value">00000</strong>
+              <div class="round-side">
+                <div class="mori-state-chip" aria-label="MORI 현재 상태">
+                  <span class="mori-state-thumb" aria-hidden="true">
+                    <img
+                      id="mori-state-thumb-img"
+                      src="./mori/mori_boot-empty.webp"
+                      width="1024"
+                      height="1024"
+                      alt=""
+                      decoding="async"
+                    />
+                  </span>
+                  <span>
+                    <small>MORI STATE</small>
+                    <strong id="mori-state-label">OBSERVING</strong>
+                  </span>
+                </div>
+                <div class="round-counters">
+                  <div class="round-time-block" id="round-time-block" aria-label="남은 시간 18.0초">
+                    <span>TIME</span>
+                    <strong id="round-time">18.0</strong>
+                  </div>
+                  <div class="score-block">
+                    <span>SCORE</span>
+                    <strong id="score-value">00000</strong>
+                  </div>
+                </div>
               </div>
             </header>
 
-            <div class="integrity-line">
-              <span>MEMORY INTEGRITY</span>
-              <div class="integrity-pips" id="integrity-pips" aria-label="기억 무결성 3">
-                <i></i><i></i><i></i>
+            <div class="integrity-line" aria-label="현재 감사 상태">
+              <div class="integrity-status">
+                <span>MEMORY INTEGRITY</span>
+                <div class="integrity-pips" id="integrity-pips" aria-label="기억 무결성 3">
+                  <i></i><i></i><i></i>
+                </div>
               </div>
+              <div class="audit-progress" id="audit-progress" data-state="active" aria-label="검증 진행과 보상">
+                <div class="audit-progress-heading">
+                  <span>VERIFIED GATE <small id="audit-reward">NEXT MORI.LOG/01</small></span>
+                  <strong id="audit-gate-value">5 MORE</strong>
+                </div>
+                <ol aria-label="여섯 라운드 진행 상황">
+                  <li data-round="0"><span>01</span><strong aria-hidden="true">◆</strong></li>
+                  <li data-round="1"><span>02</span><strong aria-hidden="true">·</strong></li>
+                  <li data-round="2"><span>03</span><strong aria-hidden="true">·</strong></li>
+                  <li data-round="3"><span>04</span><strong aria-hidden="true">·</strong></li>
+                  <li data-round="4"><span>05</span><strong aria-hidden="true">·</strong></li>
+                  <li data-round="5"><span>06</span><strong aria-hidden="true">·</strong></li>
+                </ol>
+              </div>
+              <output class="sync-status" id="sync-status" data-recovery="idle" aria-label="연속 정답 0, 추가 점수 0. 오류 뒤 3연속 정답으로 한 번 복구할 수 있습니다.">
+                <span>SYNC</span>
+                <strong id="sync-value">×0</strong>
+                <small id="sync-bonus">+000</small>
+              </output>
+              <button
+                class="lens-button"
+                id="lens-button"
+                type="button"
+                aria-keyshortcuts="F"
+                aria-describedby="lens-help"
+                disabled
+              >
+                <span class="lens-mark" aria-hidden="true">◇</span>
+                <span class="lens-copy">
+                  <small>ARCHIVE LENS</small>
+                  <strong><span id="lens-count">01 / 01</span> · <span id="lens-state">READY</span></strong>
+                </span>
+                <kbd aria-hidden="true">F</kbd>
+              </button>
             </div>
+            <p class="sr-only" id="lens-help">
+              한 라운드에 한 번, 런 전체 충전 하나를 사용해 오답 하나를 제거합니다.
+            </p>
 
-            <div class="round-context" id="round-context" aria-label="이번 문제의 실제 브라우저 상태"></div>
+            <div class="evidence-stage" id="evidence-stage" aria-hidden="true">
+              <div class="evidence-flow" id="evidence-flow"></div>
+              <div class="evidence-core" id="evidence-core"><span></span></div>
+            </div>
+            <ul class="sr-only" id="evidence-summary" aria-label="이번 문제의 브라우저 흔적"></ul>
+
+            <button
+              class="deep-verify-button"
+              id="deep-verify-button"
+              type="button"
+              aria-pressed="false"
+              aria-keyshortcuts="D"
+              aria-describedby="deep-verify-help"
+            >
+              <span class="deep-verify-mark" aria-hidden="true">◆</span>
+              <span class="deep-verify-copy">
+                <small id="deep-verify-kicker">OPTIONAL WAGER · DEEP VERIFY</small>
+                <strong id="deep-verify-label">OFF · 정답 +350 / 오답 무결성 -2</strong>
+              </span>
+              <kbd aria-hidden="true">D</kbd>
+            </button>
+            <p class="sr-only" id="deep-verify-help">
+              현재 라운드의 답에 확신이 있을 때 켭니다. 정답이면 화면에 표시된 점수를 더 받고,
+              오답 또는 시간 초과면 기억 무결성을 2칸 잃습니다. 무결성이 1칸이면 사용할 수 없습니다.
+            </p>
 
             <div
               class="statement-board"
               id="statement-board"
               role="group"
-              aria-label="AI가 추론한 세 개의 기억 문장"
-              aria-describedby="board-instruction"
+              aria-label="세 개의 기억 선택지"
+              aria-describedby="evidence-summary board-instruction"
             ></div>
+
+            <div class="round-impact" id="round-impact" data-state="idle" aria-hidden="true">
+              <span class="round-impact-portrait">
+                <img
+                  id="round-impact-portrait-img"
+                  src="./mori/mori_boot-empty.webp"
+                  width="1024"
+                  height="1024"
+                  alt=""
+                  decoding="async"
+                />
+              </span>
+              <span class="round-impact-copy">
+                <small id="round-impact-label">TRACE ACCEPTED</small>
+                <strong id="round-impact-value">+0000</strong>
+                <span id="round-impact-detail">SYNC ×1</span>
+              </span>
+            </div>
 
             <div class="scan-track" aria-hidden="true">
               <span id="scan-progress"></span>
             </div>
             <div class="board-footer">
-              <p id="board-instruction">실제 상태와 다른 문장을 선택하세요.</p>
+              <p id="board-instruction">현재 규칙과 증거에 맞는 선택지를 고르세요.</p>
               <output id="layout-readout">PRETEXT · WAITING</output>
             </div>
-            <p class="round-feedback" id="round-feedback" aria-live="polite"></p>
+            <div class="round-resolution">
+              <p class="round-feedback" id="round-feedback" aria-live="polite"></p>
+              <button class="round-continue-button" id="round-continue-button" type="button" hidden>
+                <span id="round-continue-label">NEXT TRACE</span>
+                <kbd aria-hidden="true">Enter</kbd>
+              </button>
+            </div>
           </section>
 
           <section class="screen result-screen" id="result-screen" aria-labelledby="result-heading" hidden>
             <p class="speaker-label" id="result-kicker">AUDIT COMPLETE</p>
             <div class="result-glyph" id="result-glyph" aria-hidden="true">∴</div>
             <h2 id="result-heading">기억이 정리되었습니다.</h2>
+            <p class="mori-dialogue result-mori-dialogue">
+              <span aria-hidden="true">MORI //</span>
+              <span id="result-mori-dialogue">약속대로 내 기록 하나를 줄게. 다음에도 잊지 마.</span>
+            </p>
             <p class="screen-copy" id="result-message"></p>
+
+            <p class="mission-brief result-directive" id="result-directive" data-state="pending" role="status">
+              <span class="mission-label">MORI REQUEST</span>
+              <span class="mission-copy" id="result-directive-copy">도전 결과를 계산하고 있습니다.</span>
+            </p>
 
             <dl class="result-stats">
               <div><dt>SCORE</dt><dd id="result-score">00000</dd></div>
               <div><dt>RANK</dt><dd id="result-rank">—</dd></div>
               <div><dt>TRUTH</dt><dd id="result-truth">0/6</dd></div>
+              <div><dt>SHARDS</dt><dd id="result-fragments">0/6</dd></div>
             </dl>
+
+            <article class="archive-reward" id="result-archive" data-state="locked">
+              <header>
+                <span id="result-record-code">MORI.LOG/01</span>
+                <strong id="result-record-status">LOCKED</strong>
+              </header>
+              <h3 id="result-record-title">다음 기록은 아직 잠겨 있습니다.</h3>
+              <p id="result-record-body">감사를 검증하면 MORI의 다음 기록이 열립니다.</p>
+            </article>
 
             <div class="result-actions">
               <button class="primary-button" id="remember-button" type="button">
-                이 결말을 기억하고 다시
+                <span id="remember-button-label">기억 조각 저장하고 다시</span>
                 <span aria-hidden="true">↗</span>
               </button>
               <button class="text-button" id="forget-button" type="button">
@@ -195,13 +377,13 @@
 
         <footer class="game-panel-footer">
           <span id="runtime-note">CLIENT-SIDE ONLY</span>
-          <span>NO PERSONAL DATA · NO EXTERNAL AI CALL</span>
+          <span>PRIVATE LEDGER · NO EXTERNAL CALL</span>
         </footer>
       </section>
     </main>
 
     <footer class="site-footer">
-      <p>모든 그래픽과 사운드는 브라우저에서 실시간 생성됩니다.</p>
+      <p>MORI 캐릭터 파일과 UI 그래픽은 게임을 위해 제작되며, 사운드는 브라우저에서 실시간 생성됩니다.</p>
       <p>STATE//LESS <span aria-hidden="true">©</span> 2026</p>
     </footer>
 

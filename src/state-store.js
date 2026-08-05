@@ -4,12 +4,13 @@ const ALLOWED_ENDINGS = new Set(["verified", "unstable"]);
 const ALLOWED_POLICIES = new Set(["session", "persistent"]);
 
 export const EMPTY_MEMORY = Object.freeze({
-  version: 1,
+  version: 2,
   visits: 0,
   runs: 0,
   bestScore: 0,
   lastEnding: null,
   policy: null,
+  fragments: 0,
 });
 
 function integerInRange(value, minimum, maximum) {
@@ -23,12 +24,13 @@ export function sanitizeMemory(value) {
   }
 
   return {
-    version: 1,
+    version: 2,
     visits: integerInRange(value.visits, 0, 999),
     runs: integerInRange(value.runs, 0, 999),
     bestScore: integerInRange(value.bestScore, 0, 999_999),
     lastEnding: ALLOWED_ENDINGS.has(value.lastEnding) ? value.lastEnding : null,
     policy: ALLOWED_POLICIES.has(value.policy) ? value.policy : null,
+    fragments: integerInRange(value.fragments, 0, 6),
   };
 }
 
