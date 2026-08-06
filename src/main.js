@@ -3,34 +3,32 @@ import "./styles.css";
 import { AudioEngine } from "./audio.js";
 import {
   DEEP_VERIFY_BONUS,
-  LOCK_DEEP_VERIFY_TARGET_SCALE,
-  LOCK_SWEEP_PERIOD_MS,
-  LOCK_TARGET_WIDTH_RATIO,
+  DEEP_VERIFY_BURST_MS,
   MAX_INTEGRITY,
   MAX_MEMORY_FRAGMENTS,
+  PLAY_INSTRUCTION,
   SYNC_RECOVERY_STREAK,
   TOTAL_ROUNDS,
   VERIFIED_CORRECT_REQUIRED,
+  createChipPool,
   createFactCatalog,
-  createRoundDeck,
   formatScore,
-  getAuditGateStatus,
   getArchiveLensCharges,
+  getAuditGateStatus,
   getDeepVerifyBonus,
   getFragmentReward,
   getMoriArchiveRecord,
   getResult,
-  getRoundDuration,
   getRunDirective,
   getRunDirectiveStatus,
+  getRunStyleRemark,
+  getRunStyleTag,
   getSyncRecoveryIndex,
+  getWaveConfig,
+  getWaveDurationMs,
   getWrongAnswerIntegrityLoss,
-  precisionMultiplierFor,
-  resolveLockPrecision,
   scoreCorrectAnswer,
-  seedFromString,
 } from "./game-logic.js";
-import { layoutEvidenceFlow, layoutStatementChips } from "./pretext-layout.js";
 import {
   EMPTY_MEMORY,
   clearMemory,
@@ -97,21 +95,17 @@ const elements = {
   lensButton: element("lens-button"),
   lensCount: element("lens-count"),
   lensState: element("lens-state"),
-  evidenceStage: element("evidence-stage"),
-  evidenceFlow: element("evidence-flow"),
-  evidenceCore: element("evidence-core"),
-  evidenceSummary: element("evidence-summary"),
   deepVerifyButton: element("deep-verify-button"),
   deepVerifyKicker: element("deep-verify-kicker"),
   deepVerifyLabel: element("deep-verify-label"),
-  statementBoard: element("statement-board"),
-  scanProgress: element("scan-progress"),
-  lockMeter: element("lock-meter"),
-  lockMeterHint: element("lock-meter-hint"),
-  lockMeterTarget: element("lock-meter-target"),
-  lockMeterMarker: element("lock-meter-marker"),
-  layoutReadout: element("layout-readout"),
+  liveSignalGrid: element("live-signal-grid"),
+  triageLane: element("triage-lane"),
+  zoneTrue: element("zone-true"),
+  zoneFalse: element("zone-false"),
+  zoneCorrupted: element("zone-corrupted"),
+  waveProgress: element("wave-progress"),
   boardInstruction: element("board-instruction"),
+  directiveReadout: element("directive-readout"),
   roundFeedback: element("round-feedback"),
   roundImpact: element("round-impact"),
   roundImpactLabel: element("round-impact-label"),
@@ -159,44 +153,48 @@ const runtime = {
   peerLastSeenAt: 0,
   stateRevision: 0,
   snapshot: null,
-  rounds: [],
+  catalog: [],
+  seed: "",
   roundIndex: 0,
-  roundDuration: 0,
-  remaining: 0,
-  selectedIndex: 0,
   score: 0,
   integrity: MAX_INTEGRITY,
   correct: 0,
   streak: 0,
   syncRecoveryUsed: false,
-  deepVerifyActive: false,
   deepVerifyBonus: DEEP_VERIFY_BONUS,
+  deepVerifyBurstUntil: 0,
+  deepVerifyUsedWaveIndex: -1,
   directive: null,
   directiveCompleted: false,
   directiveBonusAwarded: false,
   maxStreak: 0,
   deepVerifyWins: 0,
+  wrongCount: 0,
+  missedCount: 0,
   outcomes: [],
   lensCharges: 1,
   lensMaxCharges: 1,
   lensUsedRoundIndex: -1,
   locked: false,
-  lockPhase: false,
-  lockPendingIndex: -1,
-  lockStartedAt: 0,
-  lockTargetStart: 0,
-  lockTargetWidth: LOCK_TARGET_WIDTH_RATIO,
-  lockLastRatio: 0,
-  lockAnimationFrame: 0,
+  waveConfig: null,
+  waveChipPool: [],
+  waveChipCursor: 0,
+  waveCorrect: 0,
+  waveWrong: 0,
+  waveMissed: 0,
+  waveDeadline: 0,
+  nextSpawnAt: 0,
+  activeChips: new Map(),
+  selectedChipId: null,
+  lensRevealChipId: null,
+  triageFrame: 0,
+  moriPulseTimer: 0,
   lastFrameAt: 0,
   animationFrame: 0,
   advanceTimer: 0,
   impactTimer: 0,
   toastTimer: 0,
   resizeTimer: 0,
-  boardWidth: 0,
-  evidenceLineCount: 0,
-  optionLineCount: 0,
   lastResult: null,
   pendingFragments: 0,
   pressureWarned: false,
@@ -251,8 +249,8 @@ const MORI_STATES = {
   },
   "lens-used": {
     label: "LENS FIRED",
-    caption: "MORI // FALSE TRACE CUT",
-    dialogue: "거짓 하나, 잘라냈어. 이제 둘 중 하나야.",
+    caption: "MORI // ZONE REVEALED",
+    dialogue: "정답 구역, 미리 보여줄게. 확인하고 넣어.",
   },
   "deep-verify": {
     label: "WAGER ARMED",
@@ -291,13 +289,25 @@ const MORI_STATES = {
   },
 };
 
-const ROUND_MORI_DIALOGUE = {
-  trace: "신호는 솔직해. 해석하는 쪽이 자꾸 거짓말할 뿐이지.",
-  purge: "셋 중 하나만 일지와 어긋나. 오염된 기록을 골라.",
-  restore: "두 문장은 오염됐어. 살아남은 기록 하나만 복구해.",
-  redact: "빈칸은 하나야. 왼쪽 신호를 그대로 옮기면 돼.",
-  crosscheck: "두 기록을 따로 보면 놓쳐. 동시에 맞는 쌍을 찾아.",
-  checksum: "세 줄을 대조해. 다른 값의 개수만 세면 돼.",
+const WAVE_MORI_DIALOGUE = [
+  "신호가 흐르기 시작했어. 잡아서 제자리로 보내.",
+  "이제 두 개가 겹칠 거야. 눈을 두 군데에 둬.",
+  "오염된 신호도 섞여. 색이 다르면 의심해.",
+  "손이 바빠질 거야. 놓치는 것보다 잘못 넣는 게 더 아파.",
+  "거의 다 왔어. 속도보다 정확도.",
+  "마지막 코어야. 지금까지 중 제일 빨라.",
+];
+
+const ZONE_LABELS = {
+  true: "TRUE",
+  false: "FALSE",
+  corrupted: "CORRUPTED",
+};
+
+const WRONG_ZONE_HINT = {
+  true: "그건 진실 쪽이었어. 다음 흔적은 더 선명하게 띄울게.",
+  false: "그건 거짓 쪽이었어. 다음 흔적은 더 선명하게 띄울게.",
+  corrupted: "그건 오염된 쪽이었어. 다음 흔적은 더 선명하게 띄울게.",
 };
 
 elements.memoryButtons.forEach((button) => {
@@ -560,9 +570,11 @@ function cancelRoundTimers() {
   window.cancelAnimationFrame(runtime.animationFrame);
   window.clearTimeout(runtime.advanceTimer);
   window.clearTimeout(runtime.impactTimer);
+  window.clearTimeout(runtime.moriPulseTimer);
   runtime.animationFrame = 0;
   runtime.advanceTimer = 0;
   runtime.impactTimer = 0;
+  runtime.moriPulseTimer = 0;
 }
 
 function resetRoundImpact() {
@@ -588,15 +600,18 @@ function showRoundImpact(state, label, value, detail, autoHideMs = 0) {
   }
 }
 
-function updateRoundTime() {
-  const clockTenths = Math.max(0, Math.ceil(runtime.remaining / 100));
+const clamp01 = (value) => Math.min(1, Math.max(0, value));
+
+function updateWaveTime() {
+  const remainingMs = Math.max(0, runtime.waveDeadline - performance.now());
+  const clockTenths = Math.ceil(remainingMs / 100);
   if (clockTenths === runtime.clockTenths) return;
 
   runtime.clockTenths = clockTenths;
   const seconds = (clockTenths / 10).toFixed(1);
   elements.roundTime.textContent = seconds;
   elements.roundTimeBlock.setAttribute("aria-label", `남은 시간 ${seconds}초`);
-  elements.roundTimeBlock.dataset.state = runtime.remaining <= 5_000 ? "critical" : "active";
+  elements.roundTimeBlock.dataset.state = remainingMs <= 5_000 ? "critical" : "active";
 }
 
 function advanceRound() {
@@ -604,16 +619,30 @@ function advanceRound() {
   window.clearTimeout(runtime.advanceTimer);
   runtime.advanceTimer = 0;
   runtime.roundIndex += 1;
-  startRound();
+  startWave();
 }
 
 function createDeck() {
   runtime.snapshot = getSnapshot();
-  const catalog = createFactCatalog(runtime.snapshot);
-  const seed = seedFromString(
-    `${runtime.sessionId}:${runtime.memory.visits}:${runtime.memory.runs}:${runtime.stateRevision}`,
-  );
-  runtime.rounds = createRoundDeck(catalog, TOTAL_ROUNDS, seed);
+  runtime.catalog = createFactCatalog(runtime.snapshot);
+  runtime.seed = `${runtime.sessionId}:${runtime.memory.visits}:${runtime.memory.runs}:${runtime.stateRevision}`;
+  renderLiveSignalPanel();
+}
+
+function renderLiveSignalPanel() {
+  if (!runtime.catalog) return;
+  const fragment = document.createDocumentFragment();
+  for (const fact of runtime.catalog) {
+    const row = document.createElement("div");
+    row.className = "live-signal-row";
+    const dt = document.createElement("dt");
+    dt.textContent = fact.label;
+    const dd = document.createElement("dd");
+    dd.textContent = fact.value;
+    row.append(dt, dd);
+    fragment.append(row);
+  }
+  elements.liveSignalGrid.replaceChildren(fragment);
 }
 
 async function startGame(policy = null) {
@@ -634,13 +663,16 @@ async function startGame(policy = null) {
   runtime.correct = 0;
   runtime.streak = 0;
   runtime.syncRecoveryUsed = false;
-  runtime.deepVerifyActive = false;
+  runtime.deepVerifyBurstUntil = 0;
+  runtime.deepVerifyUsedWaveIndex = -1;
   runtime.deepVerifyBonus = DEEP_VERIFY_BONUS;
   runtime.directive = getRunDirective(runtime.memory.runs, runtime.memory.fragments);
   runtime.directiveCompleted = false;
   runtime.directiveBonusAwarded = false;
   runtime.maxStreak = 0;
   runtime.deepVerifyWins = 0;
+  runtime.wrongCount = 0;
+  runtime.missedCount = 0;
   runtime.outcomes = Array(TOTAL_ROUNDS).fill(null);
   runtime.lensMaxCharges = getArchiveLensCharges(runtime.memory.fragments);
   runtime.lensCharges = runtime.lensMaxCharges;
@@ -662,14 +694,14 @@ async function startGame(policy = null) {
   await transitionTo("play");
   revealScreenOnStackedLayout(elements.playScreen);
   audio.start();
-  startRound();
+  startWave();
 }
 
 function updateLensStatus() {
-  const usedThisRound = runtime.lensUsedRoundIndex === runtime.roundIndex;
+  const usedThisWave = runtime.lensUsedRoundIndex === runtime.roundIndex;
   let state = "READY";
   if (runtime.lensCharges <= 0) state = "EMPTY";
-  else if (usedThisRound) state = "NEXT ROUND";
+  else if (usedThisWave) state = "NEXT WAVE";
   else if (runtime.locked) state = "SCANNING";
 
   elements.lensCount.textContent = `${String(runtime.lensCharges).padStart(2, "0")} / ${String(runtime.lensMaxCharges).padStart(2, "0")}`;
@@ -678,43 +710,50 @@ function updateLensStatus() {
   elements.lensButton.disabled = runtime.mode !== "play"
     || runtime.locked
     || runtime.lensCharges <= 0
-    || usedThisRound;
+    || usedThisWave;
   elements.lensButton.setAttribute(
     "aria-label",
     `ARCHIVE LENS. ${runtime.lensCharges}/${runtime.lensMaxCharges}회 남음. 상태 ${state}. 단축키 F.`,
   );
 }
 
+function isDeepVerifyBurstActive() {
+  return performance.now() < runtime.deepVerifyBurstUntil;
+}
+
 function updateDeepVerifyStatus() {
+  const burstActive = isDeepVerifyBurstActive();
+  const usedThisWave = runtime.deepVerifyUsedWaveIndex === runtime.roundIndex;
   const available = runtime.mode === "play"
     && !runtime.locked
-    && runtime.integrity > 1;
+    && runtime.integrity > 1
+    && !usedThisWave
+    && !burstActive;
   const finalCore = runtime.roundIndex === TOTAL_ROUNDS - 1;
   const bonus = runtime.deepVerifyBonus;
-  if (!available) runtime.deepVerifyActive = false;
 
   elements.deepVerifyButton.disabled = !available;
-  elements.deepVerifyButton.dataset.active = String(runtime.deepVerifyActive);
-  elements.deepVerifyButton.setAttribute("aria-pressed", String(runtime.deepVerifyActive));
-  elements.screenStack.dataset.deepVerify = String(runtime.deepVerifyActive);
+  elements.deepVerifyButton.dataset.active = String(burstActive);
+  elements.deepVerifyButton.setAttribute("aria-pressed", String(burstActive));
+  elements.screenStack.dataset.deepVerify = String(burstActive);
   elements.deepVerifyKicker.textContent = finalCore
     ? "FINAL WAGER · DEEP VERIFY ×2"
     : "OPTIONAL WAGER · DEEP VERIFY";
-  elements.deepVerifyLabel.textContent = runtime.deepVerifyActive
+  elements.deepVerifyLabel.textContent = burstActive
     ? `ON · 정답 +${bonus} / 오답 무결성 -2`
-    : runtime.mode === "play" && runtime.locked
-      ? "SETTLED · 다음 라운드에서 선택"
+    : usedThisWave
+      ? "SETTLED · 다음 웨이브에서 다시 사용"
       : runtime.integrity <= 1
         ? "LOCKED · 무결성 2칸 필요"
-        : `OFF · 정답 +${bonus} / 오답 무결성 -2`;
+        : `OFF · 정답 +${bonus} / 오답 무결성 -2 · ${Math.round(DEEP_VERIFY_BURST_MS / 1000)}초간 지속`;
   elements.deepVerifyButton.setAttribute(
     "aria-label",
-    runtime.deepVerifyActive
-      ? `DEEP VERIFY 켜짐. 정답 추가 ${bonus}점, 오답 기억 무결성 2칸 손실. 단축키 D로 끄기.`
+    burstActive
+      ? `DEEP VERIFY 켜짐. 정답 추가 ${bonus}점, 오답 기억 무결성 2칸 손실.`
       : available
-        ? `DEEP VERIFY 꺼짐. 정답 추가 ${bonus}점, 오답 기억 무결성 2칸 손실. 단축키 D로 켜기.`
-        : runtime.mode === "play" && runtime.locked
-          ? "DEEP VERIFY 판정 완료. 다음 라운드에서 다시 선택할 수 있습니다."
+        ? `DEEP VERIFY 대기. 정답 추가 ${bonus}점, 오답 기억 무결성 2칸 손실. 단축키 D로 ${Math.round(DEEP_VERIFY_BURST_MS / 1000)}초간 켜기.`
+        : usedThisWave
+          ? "DEEP VERIFY 이번 웨이브에서 이미 사용했습니다. 다음 웨이브에서 다시 사용할 수 있습니다."
           : "DEEP VERIFY 잠김. 기억 무결성이 2칸 이상일 때 사용할 수 있습니다.",
   );
 }
@@ -797,7 +836,7 @@ function updateScoreAndIntegrity() {
   updateAuditProgress();
   updateLensStatus();
   updateDeepVerifyStatus();
-  updateLayoutReadout();
+  updateDirectiveReadout();
 }
 
 function updateAuditProgress() {
@@ -839,548 +878,442 @@ function updateAuditProgress() {
     const state = outcome || (isCurrent ? "current" : "pending");
     item.dataset.state = state;
     item.querySelector("strong").textContent = statusMarks[state];
-    item.setAttribute("aria-label", `라운드 ${index + 1}, ${statusLabels[state]}`);
+    item.setAttribute("aria-label", `웨이브 ${index + 1}, ${statusLabels[state]}`);
     if (isCurrent) item.setAttribute("aria-current", "step");
     else item.removeAttribute("aria-current");
   });
 }
 
-function updateLayoutReadout() {
+function updateDirectiveReadout() {
   const status = getActiveDirectiveStatus();
   if (!status) return;
   const progress = getDirectiveProgressLabel(status);
-  elements.layoutReadout.dataset.state = status.completed ? "complete" : "active";
-  elements.layoutReadout.textContent = `MORI REQUEST · ${status.code} · ${progress} · +${status.bonus}`;
-  elements.layoutReadout.setAttribute(
+  elements.directiveReadout.dataset.state = status.completed ? "complete" : "active";
+  elements.directiveReadout.textContent = `MORI REQUEST · ${status.code} · ${progress} · +${status.bonus}`;
+  elements.directiveReadout.setAttribute(
     "aria-label",
-    `MORI REQUEST ${status.label}. 진행 ${progress}. 완료 보너스 ${status.bonus}점. Pretext 배치 ${runtime.evidenceLineCount}개 증거 줄과 ${runtime.optionLineCount}개 선택 줄.`,
+    `MORI REQUEST ${status.label}. 진행 ${progress}. 완료 보너스 ${status.bonus}점.`,
   );
 }
 
-function applyEvidenceLayout() {
-  const round = runtime.rounds[runtime.roundIndex];
-  if (!round || runtime.mode !== "play") return;
+function clearTriageLane() {
+  elements.triageLane.replaceChildren();
+  runtime.activeChips.clear();
+  runtime.selectedChipId = null;
+  runtime.lensRevealChipId = null;
+}
 
-  const width = elements.evidenceStage.getBoundingClientRect().width;
-  if (width < 240) return;
-
-  try {
-    const layout = layoutEvidenceFlow(round.evidence, width);
-    const fragment = document.createDocumentFragment();
-    layout.lines.forEach((line) => {
-      const span = document.createElement("span");
-      span.className = "evidence-line";
-      span.textContent = line.text;
-      span.style.left = `${line.x}px`;
-      span.style.top = `${line.y}px`;
-      span.style.width = `${Math.min(line.slotWidth, width - line.x)}px`;
-      span.style.fontSize = `${layout.fontSize}px`;
-      fragment.append(span);
-    });
-    elements.evidenceFlow.replaceChildren(fragment);
-    elements.evidenceCore.style.left = `${layout.core.left}px`;
-    elements.evidenceCore.style.top = `${layout.core.top}px`;
-    elements.evidenceCore.style.width = `${layout.core.size}px`;
-    elements.evidenceCore.style.height = `${layout.core.size}px`;
-    runtime.evidenceLineCount = layout.lineCount;
-  } catch (error) {
-    console.warn("Pretext evidence layout fallback", error);
-    const fallback = document.createElement("span");
-    fallback.className = "evidence-fallback";
-    fallback.textContent = round.evidence.map((item) => `${item.label} ${item.text}`).join(" · ");
-    elements.evidenceFlow.replaceChildren(fallback);
-    runtime.evidenceLineCount = 1;
+function pickFreeTrack() {
+  const usedTracks = new Set([...runtime.activeChips.values()].map((chip) => chip.track));
+  for (let track = 0; track < 3; track += 1) {
+    if (!usedTracks.has(track)) return track;
   }
-  updateLayoutReadout();
+  return Math.floor(Math.random() * 3);
 }
 
-function renderRoundEvidence(round) {
-  const summary = document.createDocumentFragment();
-  round.evidence.forEach((item) => {
-    const entry = document.createElement("li");
-    entry.textContent = `${item.label}: ${item.text}`;
-    summary.append(entry);
+function selectChip(chipId) {
+  if (!runtime.activeChips.has(chipId)) return;
+  runtime.selectedChipId = chipId;
+  runtime.activeChips.forEach((chip, id) => {
+    chip.el.classList.toggle("is-selected", id === chipId);
   });
-  elements.evidenceSummary.replaceChildren(summary);
-  elements.evidenceStage.dataset.kind = round.kind;
-  applyEvidenceLayout();
 }
 
-function renderStatementButtons(round) {
-  const fragment = document.createDocumentFragment();
-  round.statements.forEach((statement, index) => {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "statement-chip";
-    button.dataset.index = String(index + 1).padStart(2, "0");
-    button.dataset.claim = statement.claim;
-    button.textContent = statement.text;
-    button.setAttribute("aria-label", `선택지 ${index + 1}. ${statement.text}`);
-    button.tabIndex = index === 0 ? 0 : -1;
-    button.addEventListener("pointerenter", () => selectStatement(index, false));
-    button.addEventListener("click", () => {
-      if (runtime.lockPhase) {
-        resolveLock();
-        return;
-      }
-      beginLock(index);
-    });
-    fragment.append(button);
-  });
-  elements.statementBoard.replaceChildren(fragment);
-  runtime.selectedIndex = 0;
-  selectStatement(0, runtime.inputMode === "keyboard");
-  applyStatementLayout();
-}
-
-function applyStatementLayout() {
-  const round = runtime.rounds[runtime.roundIndex];
-  if (!round || runtime.mode !== "play") return;
-
-  const width = runtime.boardWidth || elements.statementBoard.getBoundingClientRect().width;
-  if (width < 240) return;
-
-  try {
-    const layout = layoutStatementChips(round.statements, width);
-    const buttons = [...elements.statementBoard.querySelectorAll(".statement-chip")];
-    buttons.forEach((button, index) => {
-      const position = layout.positions[index];
-      if (!position) return;
-      button.style.left = `${Math.round(position.x)}px`;
-      button.style.top = `${Math.round(position.y)}px`;
-      button.style.width = `${Math.round(Math.min(position.width, width - position.x - 12))}px`;
-      button.style.fontSize = `${layout.fontSize}px`;
-    });
-    runtime.optionLineCount = layout.lineCount;
-  } catch (error) {
-    console.warn("Pretext layout fallback", error);
-    const buttons = [...elements.statementBoard.querySelectorAll(".statement-chip")];
-    buttons.forEach((button, index) => {
-      button.style.left = "16px";
-      button.style.top = `${18 + index * 66}px`;
-      button.style.width = `${Math.max(180, width - 32)}px`;
-    });
-    runtime.optionLineCount = buttons.length;
-  }
-  updateLayoutReadout();
-}
-
-function applyRoundLayouts() {
-  applyEvidenceLayout();
-  applyStatementLayout();
-}
-
-function selectStatement(index, focus = false) {
-  if (runtime.mode !== "play" || runtime.locked) return;
-  const buttons = [...elements.statementBoard.querySelectorAll(".statement-chip")];
-  if (!buttons.length) return;
-  const normalizedIndex = (index + buttons.length) % buttons.length;
-  if (buttons[normalizedIndex].disabled) return;
-  runtime.selectedIndex = normalizedIndex;
-  buttons.forEach((button, buttonIndex) => {
-    const selected = buttonIndex === runtime.selectedIndex;
-    button.classList.toggle("is-selected", selected);
-    button.tabIndex = selected ? 0 : -1;
-  });
-  if (focus) buttons[runtime.selectedIndex].focus({ preventScroll: true });
-}
-
-function moveStatementSelection(direction, focus = false) {
-  const buttons = [...elements.statementBoard.querySelectorAll(".statement-chip")];
-  const activeIndexes = buttons
-    .map((button, index) => ({ button, index }))
-    .filter(({ button }) => !button.disabled)
-    .map(({ index }) => index);
-  if (!activeIndexes.length) return;
-
-  const currentPosition = activeIndexes.indexOf(runtime.selectedIndex);
-  const nextPosition = currentPosition < 0
+function cycleChipSelection(direction) {
+  const ids = [...runtime.activeChips.keys()];
+  if (!ids.length) return;
+  const currentIndex = ids.indexOf(runtime.selectedChipId);
+  const nextIndex = currentIndex < 0
     ? 0
-    : (currentPosition + direction + activeIndexes.length) % activeIndexes.length;
-  selectStatement(activeIndexes[nextPosition], focus);
+    : (currentIndex + direction + ids.length) % ids.length;
+  selectChip(ids[nextIndex]);
+  audio.navigate(nextIndex);
 }
 
-function applyArchiveLensCut(focus = false) {
-  const round = runtime.rounds[runtime.roundIndex];
-  const buttons = [...elements.statementBoard.querySelectorAll(".statement-chip")];
-  if (!round || !buttons.length) return false;
-
-  const wrongIndexes = round.statements
-    .map((statement, index) => ({ statement, index }))
-    .filter(({ statement, index }) => !statement.isCorrect && !buttons[index].disabled)
-    .map(({ index }) => index);
-  if (!wrongIndexes.length) return false;
-
-  const targetIndex = wrongIndexes.includes(runtime.selectedIndex)
-    ? runtime.selectedIndex
-    : wrongIndexes[0];
-  const target = buttons[targetIndex];
-  target.disabled = true;
-  target.tabIndex = -1;
-  target.classList.remove("is-selected");
-  target.classList.add("is-lens-cut");
-  target.setAttribute(
-    "aria-label",
-    `ARCHIVE LENS가 제외한 오답. 선택지 ${targetIndex + 1}. ${round.statements[targetIndex].text}`,
-  );
-
-  if (targetIndex === runtime.selectedIndex) {
-    const nextIndex = buttons.findIndex((button) => !button.disabled);
-    if (nextIndex >= 0) selectStatement(nextIndex, focus);
-  } else {
-    selectStatement(runtime.selectedIndex, false);
+function removeChip(chipId) {
+  const chip = runtime.activeChips.get(chipId);
+  if (!chip) return;
+  chip.el.remove();
+  runtime.activeChips.delete(chipId);
+  if (runtime.selectedChipId === chipId) {
+    runtime.selectedChipId = null;
+    const [nextId] = runtime.activeChips.keys();
+    if (nextId) selectChip(nextId);
   }
-  return true;
+}
+
+function spawnChip() {
+  if (runtime.waveChipCursor >= runtime.waveChipPool.length) return;
+  const def = runtime.waveChipPool[runtime.waveChipCursor];
+  runtime.waveChipCursor += 1;
+
+  const track = pickFreeTrack();
+  const el = document.createElement("button");
+  el.type = "button";
+  el.className = "triage-chip";
+  el.dataset.chipId = def.id;
+  el.dataset.track = String(track);
+  el.textContent = def.text;
+  el.setAttribute("aria-label", `증거 신호: ${def.text}`);
+  el.style.setProperty("--chip-track", String(track));
+  el.style.setProperty("--chip-progress", "0");
+  el.addEventListener("click", () => selectChip(def.id));
+  elements.triageLane.append(el);
+
+  runtime.activeChips.set(def.id, {
+    def,
+    el,
+    track,
+    spawnedAt: performance.now(),
+  });
+
+  if (runtime.selectedChipId === null) selectChip(def.id);
+}
+
+function spawnZonePop(zoneKey, text, positive) {
+  const zoneEl = {
+    true: elements.zoneTrue,
+    false: elements.zoneFalse,
+    corrupted: elements.zoneCorrupted,
+  }[zoneKey];
+  if (!zoneEl) return;
+  const pop = document.createElement("span");
+  pop.className = `zone-score-pop ${positive ? "is-positive" : "is-negative"}`;
+  pop.textContent = text;
+  zoneEl.append(pop);
+  window.setTimeout(() => pop.remove(), 900);
+}
+
+function pulseMoriState(state, dialogueOverride = "") {
+  window.clearTimeout(runtime.moriPulseTimer);
+  setMoriState(state, dialogueOverride);
+  runtime.moriPulseTimer = window.setTimeout(() => {
+    if (runtime.mode !== "play" || runtime.locked) return;
+    const finalCore = runtime.roundIndex === TOTAL_ROUNDS - 1;
+    if (finalCore) setMoriState("core-final");
+    else setMoriState("observing", WAVE_MORI_DIALOGUE[runtime.roundIndex]);
+  }, 900);
+}
+
+function updateWaveProgress() {
+  if (!runtime.waveConfig) return;
+  elements.waveProgress.textContent =
+    `정답 ${runtime.waveCorrect} / ${runtime.waveConfig.target} · 오답 ${runtime.waveWrong} · 놓침 ${runtime.waveMissed}`;
+  elements.waveProgress.setAttribute(
+    "aria-label",
+    `이번 웨이브 진행. 정답 ${runtime.waveCorrect}/${runtime.waveConfig.target}, 오답 ${runtime.waveWrong}, 놓침 ${runtime.waveMissed}.`,
+  );
+}
+
+function assignSelectedChip(zone) {
+  if (runtime.mode !== "play" || runtime.locked) return;
+  if (!runtime.selectedChipId) {
+    showToast("먼저 분류할 신호를 고르세요.");
+    return;
+  }
+  resolveChip(runtime.selectedChipId, zone);
+}
+
+function resolveChip(chipId, zone) {
+  const chip = runtime.activeChips.get(chipId);
+  if (!chip || runtime.mode !== "play" || runtime.locked) return;
+
+  const finalCore = runtime.roundIndex === TOTAL_ROUNDS - 1;
+  const deepVerify = isDeepVerifyBurstActive();
+  const correct = zone === chip.def.zone;
+  const elapsed = performance.now() - chip.spawnedAt;
+  const remainingRatio = 1 - clamp01(elapsed / runtime.waveConfig.travelMs);
+
+  removeChip(chipId);
+
+  if (correct) {
+    runtime.streak += 1;
+    runtime.maxStreak = Math.max(runtime.maxStreak, runtime.streak);
+    runtime.waveCorrect += 1;
+    if (deepVerify) runtime.deepVerifyWins += 1;
+    const points = scoreCorrectAnswer(remainingRatio, runtime.streak, deepVerify, runtime.deepVerifyBonus);
+    runtime.score += points;
+    spawnZonePop(zone, `+${points}`, true);
+    audio.correct(runtime.streak);
+    pulseMoriState(runtime.streak >= 2 ? "sync-linked" : "answer-correct");
+    updateScoreAndIntegrity();
+    updateWaveProgress();
+    announce(`${ZONE_LABELS[zone]} 구역에 정확히 넣었습니다. ${points}점 획득. 연속 ${runtime.streak}.`);
+
+    if (runtime.waveCorrect >= runtime.waveConfig.target) {
+      concludeWave("correct");
+    }
+    return;
+  }
+
+  runtime.streak = 0;
+  runtime.waveWrong += 1;
+  runtime.wrongCount += 1;
+  const integrityLoss = getWrongAnswerIntegrityLoss(deepVerify);
+  runtime.integrity = Math.max(0, runtime.integrity - integrityLoss);
+  spawnZonePop(zone, `-${integrityLoss}`, false);
+  audio.wrong();
+  pulseMoriState("answer-wrong", WRONG_ZONE_HINT[chip.def.zone]);
+  updateScoreAndIntegrity();
+  updateWaveProgress();
+  announce(`${ZONE_LABELS[zone]} 구역은 오답입니다. 기억 무결성 ${integrityLoss}칸 손실.`);
+
+  if (runtime.integrity <= 0) {
+    concludeWave("wrong");
+  }
+}
+
+function expireChip(chipId) {
+  const chip = runtime.activeChips.get(chipId);
+  if (!chip) return;
+  runtime.streak = 0;
+  runtime.waveMissed += 1;
+  runtime.missedCount += 1;
+  removeChip(chipId);
+  updateScoreAndIntegrity();
+  updateWaveProgress();
 }
 
 function useArchiveLens() {
   if (runtime.mode !== "play" || runtime.locked) return;
   if (runtime.lensUsedRoundIndex === runtime.roundIndex) {
-    showToast("ARCHIVE LENS는 라운드마다 한 번만 조준할 수 있습니다.");
+    showToast("ARCHIVE LENS는 웨이브마다 한 번만 조준할 수 있습니다.");
     return;
   }
   if (runtime.lensCharges <= 0) {
     showToast("이번 런의 ARCHIVE LENS 충전을 모두 사용했습니다.");
     return;
   }
+  const targetId = runtime.selectedChipId ?? [...runtime.activeChips.keys()][0];
+  const chip = targetId ? runtime.activeChips.get(targetId) : null;
+  if (!chip) {
+    showToast("지금 화면에 분류할 신호가 없습니다.");
+    return;
+  }
 
   runtime.lensCharges -= 1;
   runtime.lensUsedRoundIndex = runtime.roundIndex;
-  if (!applyArchiveLensCut(runtime.inputMode === "keyboard")) return;
+  runtime.lensRevealChipId = targetId;
+  chip.el.classList.add("is-lens-revealed");
+  chip.el.dataset.revealZone = chip.def.zone;
 
-  elements.roundFeedback.textContent = "ARCHIVE LENS · 오염된 선택지 하나를 일지에서 제외했습니다.";
+  elements.roundFeedback.textContent = `ARCHIVE LENS · 신호 하나의 정답 구역(${ZONE_LABELS[chip.def.zone]})을 밝혔습니다.`;
   elements.roundFeedback.className = "round-feedback is-lens";
   setMoriState("lens-used");
   showRoundImpact(
     "lens",
     "ARCHIVE LENS",
-    "FALSE TRACE CUT",
+    ZONE_LABELS[chip.def.zone],
     `${runtime.lensCharges} CHARGE${runtime.lensCharges === 1 ? "" : "S"} REMAIN`,
     reducedMotionQuery.matches ? 450 : 900,
   );
   updateScoreAndIntegrity();
   audio.navigate(runtime.lensCharges);
-  announce(`ARCHIVE LENS를 사용했습니다. 오답 하나를 제외했습니다. 남은 충전 ${runtime.lensCharges}회.`);
+  announce(`ARCHIVE LENS를 사용했습니다. 신호 하나의 정답 구역을 밝혔습니다. 남은 충전 ${runtime.lensCharges}회.`);
 }
 
-function toggleDeepVerify() {
+function triggerDeepVerifyBurst() {
   if (runtime.mode !== "play" || runtime.locked) return;
   if (runtime.integrity <= 1) {
-    showToast("DEEP VERIFY는 기억 무결성이 2칸 이상일 때만 걸 수 있습니다.");
+    showToast("DEEP VERIFY는 기억 무결성이 2칸 이상일 때만 켤 수 있습니다.");
     announce("DEEP VERIFY를 사용할 수 없습니다. 기억 무결성이 1칸 남았습니다.");
     return;
   }
-
-  runtime.deepVerifyActive = !runtime.deepVerifyActive;
-  updateDeepVerifyStatus();
-  if (runtime.deepVerifyActive) {
-    elements.roundFeedback.textContent = `DEEP VERIFY ON · 정답 +${runtime.deepVerifyBonus} / 오답·시간 초과 무결성 -2`;
-    elements.roundFeedback.className = "round-feedback is-wager";
-    setMoriState("deep-verify");
-    audio.navigate(2);
-    announce(`DEEP VERIFY를 켰습니다. 정답이면 ${runtime.deepVerifyBonus}점을 더 받고, 실패하면 기억 무결성을 2칸 잃습니다.`);
+  if (runtime.deepVerifyUsedWaveIndex === runtime.roundIndex || isDeepVerifyBurstActive()) {
+    showToast("DEEP VERIFY는 웨이브마다 한 번만 사용할 수 있습니다.");
     return;
   }
 
-  elements.roundFeedback.textContent = "";
-  elements.roundFeedback.className = "round-feedback";
-  if (runtime.roundIndex === TOTAL_ROUNDS - 1) setMoriState("core-final");
-  else setMoriState("observing", ROUND_MORI_DIALOGUE[runtime.rounds[runtime.roundIndex].kind]);
-  audio.navigate(0);
-  announce("DEEP VERIFY를 껐습니다. 일반 판정으로 돌아갑니다.");
+  runtime.deepVerifyUsedWaveIndex = runtime.roundIndex;
+  runtime.deepVerifyBurstUntil = performance.now() + DEEP_VERIFY_BURST_MS;
+  updateDeepVerifyStatus();
+  elements.roundFeedback.textContent =
+    `DEEP VERIFY ON · ${Math.round(DEEP_VERIFY_BURST_MS / 1000)}초간 정답 +${runtime.deepVerifyBonus} / 오답 무결성 -2`;
+  elements.roundFeedback.className = "round-feedback is-wager";
+  setMoriState("deep-verify");
+  audio.navigate(2);
+  announce(`DEEP VERIFY를 켰습니다. ${Math.round(DEEP_VERIFY_BURST_MS / 1000)}초 동안 정답이면 ${runtime.deepVerifyBonus}점을 더 받고, 실패하면 기억 무결성을 2칸 잃습니다.`);
+
+  window.setTimeout(() => {
+    if (runtime.mode !== "play" || runtime.locked) return;
+    updateDeepVerifyStatus();
+    const finalCore = runtime.roundIndex === TOTAL_ROUNDS - 1;
+    announce("DEEP VERIFY 시간이 끝났습니다.");
+    if (!finalCore) setMoriState("observing", WAVE_MORI_DIALOGUE[runtime.roundIndex]);
+  }, DEEP_VERIFY_BURST_MS + 20);
 }
 
-function startRound() {
+function startWave() {
   cancelRoundTimers();
   if (runtime.integrity <= 0 || runtime.roundIndex >= TOTAL_ROUNDS) {
     finishGame();
     return;
   }
 
-  const round = runtime.rounds[runtime.roundIndex];
-  const roundNumber = String(runtime.roundIndex + 1).padStart(2, "0");
+  const waveNumber = String(runtime.roundIndex + 1).padStart(2, "0");
   const finalCore = runtime.roundIndex === TOTAL_ROUNDS - 1;
   runtime.locked = false;
-  runtime.roundDuration = getRoundDuration(runtime.roundIndex, round.kind);
-  runtime.remaining = runtime.roundDuration;
+  runtime.waveConfig = getWaveConfig(runtime.roundIndex);
+  runtime.waveChipPool = createChipPool(runtime.catalog, runtime.roundIndex, runtime.seed);
+  runtime.waveChipCursor = 0;
+  runtime.waveCorrect = 0;
+  runtime.waveWrong = 0;
+  runtime.waveMissed = 0;
+  runtime.nextSpawnAt = performance.now();
+  runtime.waveDeadline = performance.now() + getWaveDurationMs(runtime.roundIndex);
   runtime.clockTenths = -1;
-  runtime.lastFrameAt = performance.now();
   runtime.pressureWarned = false;
-  runtime.deepVerifyActive = false;
   runtime.deepVerifyBonus = getDeepVerifyBonus(runtime.roundIndex);
+  clearTriageLane();
   elements.screenStack.dataset.timePressure = "false";
   elements.screenStack.dataset.finalRound = String(finalCore);
 
   elements.roundKicker.textContent = finalCore
-    ? `FINAL CORE / ${round.kicker} · ${roundNumber}/${String(TOTAL_ROUNDS).padStart(2, "0")}`
-    : `${round.kicker} · ${roundNumber}/${String(TOTAL_ROUNDS).padStart(2, "0")}`;
-  elements.roundHeading.textContent = round.prompt;
-  elements.boardInstruction.textContent = round.instruction;
+    ? `FINAL CORE / SIGNAL TRIAGE · ${waveNumber}/${String(TOTAL_ROUNDS).padStart(2, "0")}`
+    : `SIGNAL TRIAGE · WAVE ${waveNumber}/${String(TOTAL_ROUNDS).padStart(2, "0")}`;
+  elements.roundHeading.textContent = PLAY_INSTRUCTION.prompt;
+  elements.boardInstruction.textContent = PLAY_INSTRUCTION.instruction;
   elements.roundFeedback.textContent = "";
   elements.roundFeedback.className = "round-feedback";
   resetRoundImpact();
-  updateRoundTime();
-  elements.scanProgress.style.transform = "scaleX(1)";
-  elements.statementBoard.style.setProperty("--scan-position", "100%");
+  updateWaveTime();
+  updateWaveProgress();
   document.title = finalCore
     ? "[FINAL CORE] STATE//LESS"
     : `[${runtime.roundIndex + 1}/${TOTAL_ROUNDS}] STATE//LESS`;
-  updateMemoryRoute(finalCore
-    ? `audit/final-core-${round.kind}`
-    : `audit/${round.kind}-${roundNumber}`);
+  updateMemoryRoute(finalCore ? "audit/final-core" : `audit/wave-${waveNumber}`);
   if (finalCore) setMoriState("core-final");
-  else setMoriState("observing", ROUND_MORI_DIALOGUE[round.kind]);
+  else setMoriState("observing", WAVE_MORI_DIALOGUE[runtime.roundIndex]);
 
-  renderRoundEvidence(round);
-  renderStatementButtons(round);
-  if (runtime.lensUsedRoundIndex === runtime.roundIndex) {
-    applyArchiveLensCut(runtime.inputMode === "keyboard");
-  }
-  elements.statementBoard.dataset.roundKind = round.kind;
   updateScoreAndIntegrity();
   if (finalCore) {
     audio.core();
-    announce(`마지막 코어 라운드. ${round.prompt} ${round.instruction} DEEP VERIFY 정답 보너스가 ${runtime.deepVerifyBonus}점으로 상승했습니다.`);
+    announce(`마지막 코어 웨이브. ${PLAY_INSTRUCTION.instruction} DEEP VERIFY 정답 보너스가 ${runtime.deepVerifyBonus}점으로 상승했습니다.`);
   } else {
-    announce(`${runtime.roundIndex + 1}번째 문제. ${round.prompt} ${round.instruction}`);
+    announce(`${runtime.roundIndex + 1}번째 웨이브 시작. ${PLAY_INSTRUCTION.instruction}`);
   }
-  runtime.animationFrame = window.requestAnimationFrame(updateRoundClock);
+  if (runtime.roundIndex === 0 && runtime.memory.runs === 0) {
+    showToast("칩 문장을 위 LIVE SIGNAL 값과 비교하세요. '읽을 수 없다'류 문장은 CORRUPTED입니다.");
+  }
+  runtime.animationFrame = window.requestAnimationFrame(updateWaveFrame);
 }
 
-function updateRoundClock(timestamp) {
+function updateWaveFrame(timestamp) {
   if (runtime.mode !== "play" || runtime.locked) return;
-  const elapsed = Math.min(100, timestamp - runtime.lastFrameAt);
-  runtime.lastFrameAt = timestamp;
-  runtime.remaining = Math.max(0, runtime.remaining - elapsed);
-  updateRoundTime();
-  const ratio = runtime.remaining / runtime.roundDuration;
-  elements.scanProgress.style.transform = `scaleX(${ratio})`;
-  elements.statementBoard.style.setProperty("--scan-position", `${ratio * 100}%`);
 
-  if (!runtime.pressureWarned && runtime.remaining <= 5_000) {
+  if (
+    timestamp >= runtime.nextSpawnAt
+    && runtime.activeChips.size < runtime.waveConfig.maxConcurrent
+    && runtime.waveChipCursor < runtime.waveChipPool.length
+  ) {
+    spawnChip();
+    runtime.nextSpawnAt = timestamp + runtime.waveConfig.spawnIntervalMs;
+  }
+
+  const expiredIds = [];
+  runtime.activeChips.forEach((chip, chipId) => {
+    const ratio = clamp01((timestamp - chip.spawnedAt) / runtime.waveConfig.travelMs);
+    chip.el.style.setProperty("--chip-progress", String(ratio * 100));
+    if (ratio >= 1) expiredIds.push(chipId);
+  });
+  expiredIds.forEach((chipId) => expireChip(chipId));
+
+  updateWaveTime();
+
+  if (!runtime.pressureWarned && runtime.waveDeadline - timestamp <= 5_000) {
     runtime.pressureWarned = true;
     elements.screenStack.dataset.timePressure = "true";
     setMoriState("time-critical");
     audio.warning();
-    announce("5초 남았습니다. 선택지를 확정하세요.");
+    announce("5초 남았습니다. 남은 신호를 빠르게 분류하세요.");
   }
 
-  if (runtime.remaining <= 0) {
-    submitAnswer(-1, true);
+  if (timestamp >= runtime.waveDeadline) {
+    concludeWave("timeout");
     return;
   }
-  runtime.animationFrame = window.requestAnimationFrame(updateRoundClock);
+  runtime.animationFrame = window.requestAnimationFrame(updateWaveFrame);
 }
 
-function lockMarkerRatioAt(timestamp) {
-  const elapsed = (timestamp - runtime.lockStartedAt) % (LOCK_SWEEP_PERIOD_MS * 2);
-  const phase = elapsed / LOCK_SWEEP_PERIOD_MS;
-  return phase <= 1 ? phase : 2 - phase;
-}
-
-function cancelLockPhase() {
-  if (!runtime.lockPhase) return;
-  runtime.lockPhase = false;
-  window.cancelAnimationFrame(runtime.lockAnimationFrame);
-  elements.lockMeter.hidden = true;
-  const buttons = [...elements.statementBoard.querySelectorAll(".statement-chip")];
-  buttons.forEach((button) => {
-    button.disabled = false;
-    button.classList.remove("is-locking", "is-muted");
-  });
-}
-
-function updateLockMarker(timestamp) {
-  if (!runtime.lockPhase) return;
-  runtime.lockLastRatio = lockMarkerRatioAt(timestamp);
-  elements.lockMeterMarker.style.left = `${runtime.lockLastRatio * 100}%`;
-  runtime.lockAnimationFrame = window.requestAnimationFrame(updateLockMarker);
-}
-
-function beginLock(index) {
-  if (runtime.mode !== "play" || runtime.locked || runtime.lockPhase) return;
-  if (index < 0) return;
-  const buttons = [...elements.statementBoard.querySelectorAll(".statement-chip")];
-  if (!buttons[index] || buttons[index].disabled) return;
-
-  if (reducedMotionQuery.matches) {
-    submitAnswer(index, false, "good");
-    return;
-  }
-
-  runtime.lockPhase = true;
-  runtime.lockPendingIndex = index;
-  runtime.lockStartedAt = performance.now();
-  const targetWidth = runtime.deepVerifyActive
-    ? LOCK_TARGET_WIDTH_RATIO * LOCK_DEEP_VERIFY_TARGET_SCALE
-    : LOCK_TARGET_WIDTH_RATIO;
-  runtime.lockTargetWidth = targetWidth;
-  runtime.lockTargetStart = Math.random() * (1 - targetWidth);
-  elements.lockMeterTarget.style.left = `${runtime.lockTargetStart * 100}%`;
-  elements.lockMeterTarget.style.width = `${targetWidth * 100}%`;
-  elements.lockMeterMarker.style.left = "0%";
-  elements.lockMeter.hidden = false;
-  elements.lockMeterHint.textContent = runtime.inputMode === "keyboard"
-    ? "지금 Space/Enter를 다시 눌러 SIGNAL LOCK 하세요."
-    : "지금 다시 클릭해 SIGNAL LOCK 하세요.";
-  elements.boardInstruction.textContent = "타이밍에 맞춰 같은 방식으로 다시 확정하세요.";
-  buttons.forEach((button, buttonIndex) => {
-    if (buttonIndex !== index) {
-      button.disabled = true;
-      button.classList.add("is-muted");
-    } else {
-      button.classList.add("is-locking");
-    }
-  });
-  runtime.lockAnimationFrame = window.requestAnimationFrame(updateLockMarker);
-}
-
-function resolveLock() {
-  if (!runtime.lockPhase) return;
-  const index = runtime.lockPendingIndex;
-  const precision = resolveLockPrecision(
-    runtime.lockLastRatio ?? 0,
-    runtime.lockTargetStart,
-    runtime.lockTargetWidth,
-  );
-  submitAnswer(index, false, precision);
-}
-
-function submitAnswer(index, timedOut = false, precision = "good") {
+function concludeWave(outcome) {
   if (runtime.mode !== "play" || runtime.locked) return;
-  cancelLockPhase();
   runtime.locked = true;
+  window.clearTimeout(runtime.moriPulseTimer);
   window.cancelAnimationFrame(runtime.animationFrame);
 
-  const round = runtime.rounds[runtime.roundIndex];
   const finalCore = runtime.roundIndex === TOTAL_ROUNDS - 1;
-  const deepVerify = runtime.deepVerifyActive;
-  const deepVerifyBonus = runtime.deepVerifyBonus;
-  const correctIndex = round.statements.findIndex((statement) => statement.isCorrect);
-  const correct = index === correctIndex;
-  const buttons = [...elements.statementBoard.querySelectorAll(".statement-chip")];
+  const correct = outcome === "correct";
+  runtime.outcomes[runtime.roundIndex] = outcome;
+  if (correct) runtime.correct += 1;
 
-  buttons.forEach((button, buttonIndex) => {
-    button.disabled = true;
-    button.classList.remove("is-selected");
-    if (buttonIndex === correctIndex) button.classList.add("is-correct");
-    if (buttonIndex === index && !correct) button.classList.add("is-wrong");
-    if (buttonIndex !== correctIndex && buttonIndex !== index) button.classList.add("is-muted");
-  });
-
-  if (correct) {
-    runtime.outcomes[runtime.roundIndex] = "correct";
-    runtime.streak += 1;
-    runtime.maxStreak = Math.max(runtime.maxStreak, runtime.streak);
-    runtime.correct += 1;
-    if (deepVerify) runtime.deepVerifyWins += 1;
-    const points = scoreCorrectAnswer(
-      runtime.remaining / runtime.roundDuration,
-      runtime.streak,
-      deepVerify,
-      deepVerifyBonus,
-      precisionMultiplierFor(precision),
-    );
-    const recoveredRoundIndex = getSyncRecoveryIndex({
+  const recoveredRoundIndex = correct
+    ? getSyncRecoveryIndex({
       outcomes: runtime.outcomes,
       streak: runtime.streak,
       used: runtime.syncRecoveryUsed,
-    });
-    const recoveredRoundNumber = recoveredRoundIndex >= 0
-      ? String(recoveredRoundIndex + 1).padStart(2, "0")
-      : "";
-    if (recoveredRoundIndex >= 0) {
-      runtime.outcomes[recoveredRoundIndex] = "recovered";
-      runtime.correct += 1;
-      runtime.integrity = Math.min(MAX_INTEGRITY, runtime.integrity + 1);
-      runtime.syncRecoveryUsed = true;
-    }
-    const directiveBonus = awardRunDirectiveBonus();
-    const awardedPoints = points + directiveBonus;
-    runtime.score += awardedPoints;
-    const wagerNotice = deepVerify ? ` · DEEP VERIFY +${deepVerifyBonus}` : "";
-    const syncNotice = runtime.streak >= 2 ? ` · SYNC ×${runtime.streak}` : "";
-    const directiveNotice = directiveBonus ? ` · MORI REQUEST +${directiveBonus}` : "";
-    const directiveDetail = directiveBonus ? ` · REQUEST +${directiveBonus}` : "";
-    const recoveryNotice = recoveredRoundIndex >= 0
-      ? ` · SYNC RECOVERY로 라운드 ${recoveredRoundNumber} 복구`
-      : "";
-    const lockNotice = precision === "perfect"
-      ? " · PERFECT LOCK"
-      : precision === "miss"
-        ? " · 확정이 흔들려 보상 절반"
-        : "";
-    elements.roundFeedback.textContent = `${finalCore ? "FINAL CORE · " : ""}${round.successText} · +${awardedPoints}${lockNotice}${wagerNotice}${syncNotice}${directiveNotice}${recoveryNotice} · ${round.explanation}`;
-    elements.roundFeedback.className = "round-feedback is-positive";
+    })
+    : -1;
+  const recoveredRoundNumber = recoveredRoundIndex >= 0
+    ? String(recoveredRoundIndex + 1).padStart(2, "0")
+    : "";
+  if (recoveredRoundIndex >= 0) {
+    runtime.outcomes[recoveredRoundIndex] = "recovered";
+    runtime.correct += 1;
+    runtime.integrity = Math.min(MAX_INTEGRITY, runtime.integrity + 1);
+    runtime.syncRecoveryUsed = true;
+  }
+
+  const directiveBonus = correct ? awardRunDirectiveBonus() : 0;
+  if (directiveBonus) runtime.score += directiveBonus;
+
+  updateScoreAndIntegrity();
+
+  if (correct) {
     audio.correct(runtime.streak);
     setMoriState(recoveredRoundIndex >= 0
       ? "sync-recovery"
       : directiveBonus > 0
         ? "directive-complete"
-        : runtime.streak >= 2 ? "sync-linked" : "answer-correct");
+        : finalCore ? "core-final" : "answer-correct");
+    const recoveryNotice = recoveredRoundIndex >= 0
+      ? ` · SYNC RECOVERY로 웨이브 ${recoveredRoundNumber} 복구`
+      : "";
+    const directiveNotice = directiveBonus ? ` · MORI REQUEST +${directiveBonus}` : "";
+    elements.roundFeedback.textContent =
+      `${finalCore ? "FINAL CORE · " : ""}웨이브 클리어 · 정답 ${runtime.waveCorrect}개${directiveNotice}${recoveryNotice}`;
+    elements.roundFeedback.className = "round-feedback is-positive";
     showRoundImpact(
       "correct",
       recoveredRoundIndex >= 0
         ? "SYNC RECOVERY"
         : finalCore
-          ? deepVerify ? "CORE DEEP VERIFIED" : "CORE SEALED"
-          : directiveBonus > 0
-            ? "REQUEST SEALED"
-            : deepVerify ? "DEEP VERIFIED" : runtime.streak >= 2 ? "SYNC LINKED" : "TRACE ACCEPTED",
-      `+${awardedPoints}`,
-      recoveredRoundIndex >= 0
-        ? `R${recoveredRoundNumber} RESTORED${deepVerify ? ` · WAGER +${deepVerifyBonus}` : ""}${directiveDetail}`
-        : `${finalCore ? "FINAL CORE · " : ""}${deepVerify ? `WAGER +${deepVerifyBonus} · ` : ""}CHAIN ×${runtime.streak}${lockNotice}${directiveDetail} · ${elements.roundTime.textContent} SEC`,
+          ? "CORE SEALED"
+          : directiveBonus > 0 ? "REQUEST SEALED" : "WAVE CLEARED",
+      `+${directiveBonus || runtime.waveCorrect}`,
+      `CHAIN ×${runtime.maxStreak} · WRONG ${runtime.waveWrong} · MISS ${runtime.waveMissed}`,
     );
-    const directiveAnnouncement = directiveBonus
-      ? ` MORI REQUEST를 완료해 ${directiveBonus}점을 추가로 획득했습니다.`
-      : "";
-    const lockAnnouncement = precision === "perfect"
-      ? " SIGNAL LOCK 완벽하게 맞췄습니다."
-      : precision === "miss"
-        ? " SIGNAL LOCK 타이밍이 빗나가 보상이 절반으로 줄었습니다."
-        : "";
-    announce(recoveredRoundIndex >= 0
-      ? `정답입니다. ${points}점을 획득했습니다.${lockAnnouncement}${deepVerify ? ` DEEP VERIFY 추가 점수 ${deepVerifyBonus}점.` : ""}${directiveAnnouncement} 3연속 정답으로 ${recoveredRoundIndex + 1}번째 오류를 복구하고 기억 무결성 1칸을 회복했습니다. ${round.explanation}`
-      : `${finalCore ? "마지막 코어를 봉인했습니다. " : "정답입니다. "}${points}점을 획득했습니다.${lockAnnouncement}${deepVerify ? ` DEEP VERIFY 추가 점수 ${deepVerifyBonus}점.` : ""}${directiveAnnouncement} 연속 정답 ${runtime.streak}. ${round.explanation}`);
+    announce(`웨이브 ${runtime.roundIndex + 1} 클리어. 정답 ${runtime.waveCorrect}개.${directiveBonus ? ` MORI REQUEST 완료 +${directiveBonus}점.` : ""}`);
   } else {
-    runtime.outcomes[runtime.roundIndex] = timedOut ? "timeout" : "wrong";
     runtime.streak = 0;
-    const integrityLoss = getWrongAnswerIntegrityLoss(deepVerify);
-    runtime.integrity = Math.max(0, runtime.integrity - integrityLoss);
-    const roundsRemaining = TOTAL_ROUNDS - runtime.roundIndex - 1;
-    const recoveryHint = !runtime.syncRecoveryUsed && roundsRemaining >= SYNC_RECOVERY_STREAK
-      ? ` · 다음 ${SYNC_RECOVERY_STREAK}개를 연속 검증하면 SYNC RECOVERY`
-      : "";
-    elements.roundFeedback.textContent = timedOut
-      ? `${finalCore ? "FINAL CORE · " : ""}스캔 시간 초과${deepVerify ? " · DEEP VERIFY 실패" : ""} · 기억 무결성 -${integrityLoss}${recoveryHint} · ${round.explanation}`
-      : `${finalCore ? "FINAL CORE · " : ""}${round.failureText}${deepVerify ? " · DEEP VERIFY 실패" : ""} · 기억 무결성 -${integrityLoss}${recoveryHint} · ${round.explanation}`;
-    elements.roundFeedback.className = "round-feedback is-negative";
     audio.wrong();
     setMoriState(
       "answer-wrong",
-      finalCore
-        ? "마지막 색인이 갈라졌어. 그래도 결과를 보기 전까지는 놓지 마."
-        : deepVerify ? "깊게 새긴 만큼 상처도 깊어. 아직 끝난 건 아니야." : "",
+      finalCore ? "마지막 코어를 봉인하지 못했어. 그래도 결과를 보기 전까지는 놓지 마." : "",
     );
+    elements.roundFeedback.textContent =
+      `${finalCore ? "FINAL CORE · " : ""}웨이브 실패 · 정답 ${runtime.waveCorrect}/${runtime.waveConfig.target}`;
+    elements.roundFeedback.className = "round-feedback is-negative";
     showRoundImpact(
-      timedOut ? "timeout" : "wrong",
-      finalCore ? "CORE FRACTURE" : deepVerify ? "WAGER BROKEN" : timedOut ? "TIME FRACTURE" : "INDEX HURT",
-      `INTEGRITY -${integrityLoss}`,
-      recoveryHint
-        ? "CHAIN ×3 CAN RESTORE"
-        : finalCore
-          ? deepVerify ? `FINAL WAGER +${deepVerifyBonus} FAILED` : "FINAL CORE UNSEALED"
-          : deepVerify ? "DEEP VERIFY FAILED" : timedOut ? "SCAN WINDOW CLOSED" : "CORRECT TRACE REVEALED",
+      outcome === "timeout" ? "timeout" : "wrong",
+      finalCore ? "CORE FRACTURE" : outcome === "timeout" ? "TIME FRACTURE" : "INDEX HURT",
+      `${runtime.waveCorrect}/${runtime.waveConfig.target}`,
+      outcome === "timeout" ? "SCAN WINDOW CLOSED" : "INTEGRITY DEPLETED",
     );
-    announce(timedOut
-      ? `시간이 초과되었습니다. 기억 무결성을 ${integrityLoss}칸 잃었습니다. ${round.explanation}`
-      : `틀렸습니다. 기억 무결성을 ${integrityLoss}칸 잃었습니다. ${round.explanation}`);
+    announce(`웨이브 ${runtime.roundIndex + 1}을 완료하지 못했습니다. 정답 ${runtime.waveCorrect}/${runtime.waveConfig.target}.`);
   }
 
-  updateScoreAndIntegrity();
   const auditFinished = runtime.integrity <= 0 || runtime.roundIndex >= TOTAL_ROUNDS - 1;
-  elements.roundContinueLabel.textContent = auditFinished ? "VIEW RESULT" : "NEXT TRACE";
+  elements.roundContinueLabel.textContent = auditFinished ? "VIEW RESULT" : "NEXT WAVE";
   elements.roundContinueButton.hidden = false;
   if (runtime.inputMode === "keyboard") {
     elements.roundContinueButton.focus({ preventScroll: true });
@@ -1437,6 +1370,13 @@ async function finishGame() {
   });
 
   const result = runtime.lastResult;
+  const styleTag = getRunStyleTag({
+    deepVerifyWins: runtime.deepVerifyWins,
+    syncRecoveryUsed: runtime.syncRecoveryUsed,
+    wrongCount: runtime.wrongCount,
+    maxStreak: runtime.maxStreak,
+  });
+  const styleRemark = getRunStyleRemark(styleTag);
   renderResultDirective(result.ending);
   runtime.pendingFragments = getFragmentReward(runtime.memory.fragments, result.ending);
   const foundNewFragment = runtime.pendingFragments > runtime.memory.fragments;
@@ -1475,6 +1415,9 @@ async function finishGame() {
   setMoriState(completedNow
     ? "archive-complete"
     : result.ending === "verified" ? "result-verified" : "result-unstable");
+  if (styleRemark) {
+    elements.resultMoriDialogue.textContent = `${elements.resultMoriDialogue.textContent} ${styleRemark}`;
+  }
   document.title = `${result.rank} RANK · STATE//LESS`;
 
   await transitionTo("result");
@@ -1526,12 +1469,9 @@ async function forgetAndReturn() {
 function regenerateActiveRound(reason, moriState = "observing") {
   if (runtime.mode !== "play" || runtime.locked) return;
   runtime.stateRevision += 1;
-  const currentIndex = runtime.roundIndex;
-  const completed = runtime.rounds.slice(0, currentIndex);
   createDeck();
-  runtime.rounds.splice(0, currentIndex, ...completed);
   showToast(reason);
-  startRound();
+  startWave();
   setMoriState(moriState);
 }
 
@@ -1606,21 +1546,10 @@ function handleGlobalKeydown(event) {
     return;
   }
 
-  if (
-    runtime.mode === "play"
-    && runtime.lockPhase
-    && (event.key === " " || event.key === "Enter")
-    && !event.target.closest("#sound-button, #lens-button")
-  ) {
-    event.preventDefault();
-    if (!event.repeat) resolveLock();
-    return;
-  }
-
-  if (runtime.mode === "play" && !runtime.locked && !runtime.lockPhase) {
+  if (runtime.mode === "play" && !runtime.locked) {
     if (event.key.toLowerCase() === "d") {
       event.preventDefault();
-      if (!event.repeat) toggleDeepVerify();
+      if (!event.repeat) triggerDeepVerifyBurst();
       return;
     }
     if (event.key.toLowerCase() === "f") {
@@ -1630,17 +1559,23 @@ function handleGlobalKeydown(event) {
     }
     if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
       event.preventDefault();
-      const direction = event.key === "ArrowRight" ? 1 : -1;
-      moveStatementSelection(direction, true);
-      audio.navigate(runtime.selectedIndex);
+      cycleChipSelection(event.key === "ArrowRight" ? 1 : -1);
       return;
     }
-    if (
-      (event.key === " " || event.key === "Enter")
-      && !event.target.closest("#sound-button, #lens-button")
-    ) {
+    if (event.key === "1") {
       event.preventDefault();
-      beginLock(runtime.selectedIndex);
+      assignSelectedChip("true");
+      return;
+    }
+    if (event.key === "2") {
+      event.preventDefault();
+      assignSelectedChip("false");
+      return;
+    }
+    if (event.key === "3") {
+      event.preventDefault();
+      assignSelectedChip("corrupted");
+      return;
     }
     return;
   }
@@ -1689,14 +1624,6 @@ async function initialize() {
   });
   renderIntro();
   setVisibleScreen("intro");
-
-  const resizeObserver = new ResizeObserver(([entry]) => {
-    const width = Math.round(entry.contentRect.width);
-    if (width < 240 || Math.abs(width - runtime.boardWidth) < 2) return;
-    runtime.boardWidth = width;
-    applyRoundLayouts();
-  });
-  resizeObserver.observe(elements.statementBoard);
 }
 
 document.addEventListener("pointerdown", (event) => {
@@ -1709,7 +1636,10 @@ elements.memoryButtons.forEach((button) => {
 });
 elements.returnStartButton.addEventListener("click", () => startGame());
 elements.lensButton.addEventListener("click", useArchiveLens);
-elements.deepVerifyButton.addEventListener("click", toggleDeepVerify);
+elements.deepVerifyButton.addEventListener("click", triggerDeepVerifyBurst);
+elements.zoneTrue.addEventListener("click", () => assignSelectedChip("true"));
+elements.zoneFalse.addEventListener("click", () => assignSelectedChip("false"));
+elements.zoneCorrupted.addEventListener("click", () => assignSelectedChip("corrupted"));
 elements.roundContinueButton.addEventListener("click", advanceRound);
 elements.rememberButton.addEventListener("click", rememberResultAndRestart);
 elements.forgetButton.addEventListener("click", forgetAndReturn);

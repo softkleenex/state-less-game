@@ -84,7 +84,7 @@
 
         <div class="technology-note">
           <span>WEB-NATIVE ENGINE</span>
-          <p>PRETEXT · COOKIE STORE · VIEW TRANSITION · BROADCAST CHANNEL</p>
+          <p>COOKIE STORE · VIEW TRANSITION · BROADCAST CHANNEL · WEB AUDIO</p>
         </div>
       </section>
 
@@ -181,7 +181,7 @@
           <section class="screen game-screen" id="play-screen" aria-labelledby="round-heading" hidden>
             <header class="round-header">
               <div class="round-heading-copy">
-                <span class="micro-label" id="round-kicker">MEMORY PUZZLE 01/06</span>
+                <span class="micro-label" id="round-kicker">SIGNAL TRIAGE · WAVE 01/06</span>
                 <h2 id="round-heading">지금 진짜인 신호를 고르세요.</h2>
                 <p class="mori-dialogue">
                   <span aria-hidden="true">MORI //</span>
@@ -218,6 +218,14 @@
               </div>
             </header>
 
+            <details class="live-signal-panel" id="live-signal-panel" open>
+              <summary>
+                <span>LIVE SIGNAL</span>
+                <small>지금 이 브라우저의 실제 상태 · 칩과 비교하세요</small>
+              </summary>
+              <dl class="live-signal-grid" id="live-signal-grid" aria-label="현재 브라우저의 실제 상태값"></dl>
+            </details>
+
             <div class="integrity-line" aria-label="현재 감사 상태">
               <div class="integrity-status">
                 <span>MEMORY INTEGRITY</span>
@@ -230,13 +238,13 @@
                   <span>VERIFIED GATE <small id="audit-reward">NEXT MORI.LOG/01</small></span>
                   <strong id="audit-gate-value">5 MORE</strong>
                 </div>
-                <ol aria-label="여섯 라운드 진행 상황">
-                  <li data-round="0"><span>01</span><strong aria-hidden="true">◆</strong></li>
-                  <li data-round="1"><span>02</span><strong aria-hidden="true">·</strong></li>
-                  <li data-round="2"><span>03</span><strong aria-hidden="true">·</strong></li>
-                  <li data-round="3"><span>04</span><strong aria-hidden="true">·</strong></li>
-                  <li data-round="4"><span>05</span><strong aria-hidden="true">·</strong></li>
-                  <li data-round="5"><span>06</span><strong aria-hidden="true">·</strong></li>
+                <ol aria-label="여섯 웨이브 진행 상황">
+                  <li data-wave="0"><span>01</span><strong aria-hidden="true">◆</strong></li>
+                  <li data-wave="1"><span>02</span><strong aria-hidden="true">·</strong></li>
+                  <li data-wave="2"><span>03</span><strong aria-hidden="true">·</strong></li>
+                  <li data-wave="3"><span>04</span><strong aria-hidden="true">·</strong></li>
+                  <li data-wave="4"><span>05</span><strong aria-hidden="true">·</strong></li>
+                  <li data-wave="5"><span>06</span><strong aria-hidden="true">·</strong></li>
                 </ol>
               </div>
               <output class="sync-status" id="sync-status" data-recovery="idle" aria-label="연속 정답 0, 추가 점수 0. 오류 뒤 3연속 정답으로 한 번 복구할 수 있습니다.">
@@ -261,14 +269,8 @@
               </button>
             </div>
             <p class="sr-only" id="lens-help">
-              한 라운드에 한 번, 런 전체 충전 하나를 사용해 오답 하나를 제거합니다.
+              한 웨이브에 한 번, 런 전체 충전 하나를 사용해 신호 하나의 정답 구역을 밝힙니다.
             </p>
-
-            <div class="evidence-stage" id="evidence-stage" aria-hidden="true">
-              <div class="evidence-flow" id="evidence-flow"></div>
-              <div class="evidence-core" id="evidence-core"><span></span></div>
-            </div>
-            <ul class="sr-only" id="evidence-summary" aria-label="이번 문제의 브라우저 흔적"></ul>
 
             <button
               class="deep-verify-button"
@@ -281,29 +283,35 @@
               <span class="deep-verify-mark" aria-hidden="true">◆</span>
               <span class="deep-verify-copy">
                 <small id="deep-verify-kicker">OPTIONAL WAGER · DEEP VERIFY</small>
-                <strong id="deep-verify-label">OFF · 정답 +350 / 오답 무결성 -2</strong>
+                <strong id="deep-verify-label">OFF · 정답 +350 / 오답 무결성 -2 · 5초간 지속</strong>
               </span>
               <kbd aria-hidden="true">D</kbd>
             </button>
             <p class="sr-only" id="deep-verify-help">
-              현재 라운드의 답에 확신이 있을 때 켭니다. 정답이면 화면에 표시된 점수를 더 받고,
-              오답 또는 시간 초과면 기억 무결성을 2칸 잃습니다. 무결성이 1칸이면 사용할 수 없습니다.
+              웨이브당 한 번, 5초 동안 켤 수 있습니다. 그 동안 정답이면 추가 점수를 받고,
+              오답이면 기억 무결성을 2칸 잃습니다. 무결성이 1칸이면 사용할 수 없습니다.
             </p>
 
-            <div
-              class="statement-board"
-              id="statement-board"
-              role="group"
-              aria-label="세 개의 기억 선택지"
-              aria-describedby="evidence-summary board-instruction"
-            ></div>
+            <output class="wave-progress" id="wave-progress" aria-live="polite">정답 0 / 0 · 오답 0 · 놓침 0</output>
 
-            <div class="lock-meter" id="lock-meter" hidden aria-hidden="true">
-              <p class="lock-meter-hint" id="lock-meter-hint">지금 다시 눌러 SIGNAL LOCK 하세요.</p>
-              <div class="lock-meter-track">
-                <span class="lock-meter-target" id="lock-meter-target"></span>
-                <span class="lock-meter-marker" id="lock-meter-marker"></span>
-              </div>
+            <div class="triage-lane" id="triage-lane" role="group" aria-label="흐르는 증거 신호"></div>
+            <p class="sr-only" id="triage-help">
+              칩을 클릭하거나 화살표로 골라 선택한 뒤, TRUE·FALSE·CORRUPTED 구역을 클릭하거나
+              숫자 1·2·3 키를 눌러 분류하세요.
+            </p>
+            <div class="triage-zones" id="triage-zones">
+              <button class="triage-zone" id="zone-true" data-zone="true" type="button">
+                <span>TRUE</span>
+                <kbd aria-hidden="true">1</kbd>
+              </button>
+              <button class="triage-zone" id="zone-false" data-zone="false" type="button">
+                <span>FALSE</span>
+                <kbd aria-hidden="true">2</kbd>
+              </button>
+              <button class="triage-zone" id="zone-corrupted" data-zone="corrupted" type="button">
+                <span>CORRUPTED</span>
+                <kbd aria-hidden="true">3</kbd>
+              </button>
             </div>
 
             <div class="round-impact" id="round-impact" data-state="idle" aria-hidden="true">
@@ -324,17 +332,14 @@
               </span>
             </div>
 
-            <div class="scan-track" aria-hidden="true">
-              <span id="scan-progress"></span>
-            </div>
             <div class="board-footer">
-              <p id="board-instruction">아래 후보 중 하나를 고르고, 확정 순간에 맞춰 SIGNAL LOCK 하세요.</p>
-              <output id="layout-readout">PRETEXT · WAITING</output>
+              <p id="board-instruction">TRUE · FALSE · CORRUPTED 중 이 신호가 속한 구역으로 옮기세요.</p>
+              <output id="directive-readout">MORI REQUEST · WAITING</output>
             </div>
             <div class="round-resolution">
               <p class="round-feedback" id="round-feedback" aria-live="polite"></p>
               <button class="round-continue-button" id="round-continue-button" type="button" hidden>
-                <span id="round-continue-label">NEXT TRACE</span>
+                <span id="round-continue-label">NEXT WAVE</span>
                 <kbd aria-hidden="true">Enter</kbd>
               </button>
             </div>

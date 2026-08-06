@@ -2,34 +2,24 @@ export const TOTAL_ROUNDS = 6;
 export const MAX_INTEGRITY = 3;
 export const MAX_MEMORY_FRAGMENTS = 6;
 export const VERIFIED_CORRECT_REQUIRED = TOTAL_ROUNDS - 1;
-export const ROUND_DURATION_MS = 18_000;
 export const SYNC_RECOVERY_STREAK = 3;
 export const DEEP_VERIFY_BONUS = 350;
 export const DEEP_VERIFY_INTEGRITY_LOSS = 2;
 export const FINAL_CORE_DEEP_VERIFY_BONUS = DEEP_VERIFY_BONUS * 2;
 export const RUN_DIRECTIVE_BONUS = 600;
 
-export const LOCK_SWEEP_PERIOD_MS = 1_100;
-export const LOCK_TARGET_WIDTH_RATIO = 0.32;
-export const LOCK_PERFECT_WIDTH_RATIO = 0.34;
-export const LOCK_DEEP_VERIFY_TARGET_SCALE = 0.6;
-export const LOCK_PERFECT_MULTIPLIER = 1.2;
-export const LOCK_MISS_MULTIPLIER = 0.5;
-
 export const PLAY_INSTRUCTION = {
-  prompt: "지금 진짜인 신호를 고르세요.",
-  instruction: "아래 후보 중 하나를 고르고, 확정 순간에 맞춰 SIGNAL LOCK 하세요.",
+  prompt: "흐르는 신호를 잡아 올바른 구역에 넣으세요.",
+  instruction: "TRUE · FALSE · CORRUPTED 중 이 신호가 속한 구역으로 옮기세요.",
 };
 
-const ROUND_TYPE_SEQUENCE = [
-  "trace",
-  "purge",
-  "restore",
-  "redact",
-  "crosscheck",
-  "checksum",
-];
-const BASIC_ROUND_TYPE_COUNT = 4;
+export const WAVE_CHIP_TARGET = [5, 6, 7, 8, 9, 11];
+export const WAVE_SPAWN_INTERVAL_MS = [2_600, 2_300, 2_000, 1_700, 1_400, 1_100];
+export const WAVE_TRAVEL_MS = [7_200, 6_400, 5_600, 4_800, 4_000, 3_200];
+export const WAVE_MAX_CONCURRENT = [1, 2, 2, 3, 3, 3];
+export const WAVE_CORRUPTED_CHANCE = [0, 0.15, 0.2, 0.25, 0.3, 0.35];
+export const DEEP_VERIFY_BURST_MS = 5_000;
+export const WAVE_DURATION_BUFFER = 1.8;
 
 const RUN_DIRECTIVES = [
   {
@@ -51,44 +41,6 @@ const RUN_DIRECTIVES = [
     target: MAX_INTEGRITY,
   },
 ];
-
-const COMPLEX_ROUND_BONUS_MS = {
-  crosscheck: 4_000,
-  checksum: 7_000,
-};
-
-const ROUND_COPY = {
-  purge: {
-    kicker: "CORRUPTION HUNT",
-    successText: "거짓 제거 완료",
-    failureText: "진실을 지웠습니다",
-  },
-  trace: {
-    kicker: "TRACE DECODE",
-    successText: "신호 해독 완료",
-    failureText: "신호 해석에 실패했습니다",
-  },
-  restore: {
-    kicker: "MEMORY RESTORE",
-    successText: "진실 복구 완료",
-    failureText: "오염된 기억을 복구했습니다",
-  },
-  redact: {
-    kicker: "REDACTION FILL",
-    successText: "색인 값 복원 완료",
-    failureText: "잘못된 값을 색인했습니다",
-  },
-  crosscheck: {
-    kicker: "DOUBLE ENTRY",
-    successText: "교차 검증 완료",
-    failureText: "한쪽 기록과 어긋났습니다",
-  },
-  checksum: {
-    kicker: "CHECKSUM AUDIT",
-    successText: "체크섬 검증 완료",
-    failureText: "오염 개수를 잘못 계산했습니다",
-  },
-};
 
 const ENDING_LABELS = {
   verified: "VERIFIED",
@@ -360,155 +312,58 @@ function shuffle(items, random) {
   return result;
 }
 
-export function createRoundDeck(catalog, totalRounds, seed) {
-  if (catalog.length < 3) {
-    throw new Error("At least three facts are required to build a round.");
+export function getWaveConfig(waveIndex) {
+  const index = clamp(Math.floor(waveIndex), 0, WAVE_CHIP_TARGET.length - 1);
+  return {
+    target: WAVE_CHIP_TARGET[index],
+    spawnIntervalMs: WAVE_SPAWN_INTERVAL_MS[index],
+    travelMs: WAVE_TRAVEL_MS[index],
+    maxConcurrent: WAVE_MAX_CONCURRENT[index],
+    corruptedChance: WAVE_CORRUPTED_CHANCE[index],
+  };
+}
+
+export function getWaveDurationMs(waveIndex) {
+  const { target, spawnIntervalMs } = getWaveConfig(waveIndex);
+  return Math.round(target * spawnIntervalMs * WAVE_DURATION_BUFFER);
+}
+
+const ZONE_FIELD = {
+  true: "truthText",
+  false: "lieText",
+  corrupted: "decoyText",
+};
+
+function pickZone(random, corruptedChance) {
+  if (random() < corruptedChance) return "corrupted";
+  return random() < 0.5 ? "true" : "false";
+}
+
+export function createChipPool(catalog, waveIndex, seed) {
+  if (catalog.length < 1) {
+    throw new Error("At least one fact is required to build a signal wave.");
   }
 
-  const random = createRandom(seed);
-  const kindSequence = [
-    ...shuffle(ROUND_TYPE_SEQUENCE.slice(0, BASIC_ROUND_TYPE_COUNT), random),
-    ...shuffle(ROUND_TYPE_SEQUENCE.slice(BASIC_ROUND_TYPE_COUNT), random),
-  ];
-  const pool = shuffle(catalog, random);
-  const rounds = [];
+  const { target, corruptedChance } = getWaveConfig(waveIndex);
+  const random = createRandom(seedFromString(`${seed}:wave:${waveIndex}`));
+  const poolSize = Math.max(target * 3, 12);
+  const facts = shuffle(catalog, random);
+  const chips = [];
 
-  for (let roundIndex = 0; roundIndex < totalRounds; roundIndex += 1) {
-    const kind = kindSequence[roundIndex % kindSequence.length];
-    const copy = ROUND_COPY[kind];
-    const firstIndex = (roundIndex * 2) % pool.length;
-    const facts = [
-      pool[firstIndex],
-      pool[(firstIndex + 1) % pool.length],
-      pool[(firstIndex + 3) % pool.length],
-    ];
-    let statements;
-    let evidence;
-    let explanation;
-
-    if (kind === "trace") {
-      const answerFact = facts[Math.floor(random() * facts.length)];
-      evidence = [{ label: "SIGNAL 01", text: answerFact.evidenceText }];
-      statements = [
-        {
-          factId: answerFact.id,
-          text: answerFact.truthText,
-          claim: "truth",
-          isCorrect: true,
-        },
-        {
-          factId: answerFact.id,
-          text: answerFact.lieText,
-          claim: "lie",
-          isCorrect: false,
-        },
-        {
-          factId: answerFact.id,
-          text: answerFact.decoyText,
-          claim: "decoy",
-          isCorrect: false,
-        },
-      ];
-      explanation = `${answerFact.evidenceText} · 실제 기록은 “${answerFact.truthText}”입니다.`;
-    } else if (kind === "redact") {
-      const answerFact = facts[Math.floor(random() * facts.length)];
-      const claims = ["value", "alternate", "unknown"];
-      evidence = [{ label: "SOURCE TRACE", text: answerFact.evidenceText }];
-      statements = answerFact.valueOptions.map((value, index) => ({
-        factId: answerFact.id,
-        text: `${answerFact.id.toUpperCase()}=${value}`,
-        claim: claims[index],
-        isCorrect: index === 0,
-      }));
-      explanation = `${answerFact.evidenceText} · 복원 값은 ${answerFact.id.toUpperCase()}=${answerFact.value}입니다.`;
-    } else if (kind === "crosscheck") {
-      const [leftFact, rightFact] = facts;
-      const formatPair = (leftValue, rightValue) => (
-        `${leftFact.id.toUpperCase()}=${leftValue} · ${rightFact.id.toUpperCase()}=${rightValue}`
-      );
-      evidence = [
-        { label: "TRACE A", text: leftFact.evidenceText },
-        { label: "TRACE B", text: rightFact.evidenceText },
-      ];
-      statements = [
-        {
-          factId: `${leftFact.id}+${rightFact.id}`,
-          text: formatPair(leftFact.value, rightFact.value),
-          claim: "verified-pair",
-          isCorrect: true,
-        },
-        {
-          factId: `${leftFact.id}+${rightFact.id}`,
-          text: formatPair(leftFact.valueOptions[1], rightFact.value),
-          claim: "left-corrupt",
-          isCorrect: false,
-        },
-        {
-          factId: `${leftFact.id}+${rightFact.id}`,
-          text: formatPair(leftFact.value, rightFact.valueOptions[1]),
-          claim: "right-corrupt",
-          isCorrect: false,
-        },
-      ];
-      explanation = `${leftFact.evidenceText} / ${rightFact.evidenceText} · 두 필드가 모두 원본 신호와 일치합니다.`;
-    } else if (kind === "checksum") {
-      const corruptionCount = 1 + Math.floor(random() * 3);
-      const corruptedIndexes = new Set(
-        shuffle([0, 1, 2], random).slice(0, corruptionCount),
-      );
-      evidence = facts.map((fact, index) => {
-        const candidateValue = corruptedIndexes.has(index)
-          ? fact.valueOptions[1]
-          : fact.value;
-        return {
-          label: `CHECK ${String(index + 1).padStart(2, "0")}`,
-          text: `${fact.evidenceText} ↔ ${fact.id.toUpperCase()}=${candidateValue}`,
-        };
-      });
-      const countOptions = [1, 2, 3];
-      statements = countOptions.map((count) => ({
-        factId: `checksum-${count}`,
-        text: `오염 필드 ${count}개`,
-        claim: `count-${count}`,
-        isCorrect: count === corruptionCount,
-      }));
-      const corruptedLabels = facts
-        .filter((_, index) => corruptedIndexes.has(index))
-        .map((fact) => fact.label)
-        .join(", ");
-      explanation = `신호와 후보 값이 다른 필드는 ${corruptionCount}개(${corruptedLabels})입니다.`;
-    } else {
-      const answerIndex = Math.floor(random() * facts.length);
-      const answerClaim = kind === "purge" ? "lie" : "truth";
-      evidence = facts.map((fact, index) => ({
-        label: `TRACE ${String(index + 1).padStart(2, "0")}`,
-        text: fact.evidenceText,
-      }));
-      statements = facts.map((fact, index) => {
-        const claim = index === answerIndex ? answerClaim : answerClaim === "lie" ? "truth" : "lie";
-        return {
-          factId: fact.id,
-          text: claim === "truth" ? fact.truthText : fact.lieText,
-          claim,
-          isCorrect: index === answerIndex,
-        };
-      });
-      const answerFact = facts[answerIndex];
-      explanation = `${answerFact.evidenceText} · 실제 기록은 “${answerFact.truthText}”입니다.`;
-    }
-
-    rounds.push({
-      id: roundIndex + 1,
-      kind,
-      ...copy,
-      ...PLAY_INSTRUCTION,
-      evidence,
-      explanation,
-      statements: shuffle(statements, random),
+  for (let index = 0; index < poolSize; index += 1) {
+    const fact = facts[index % facts.length];
+    const zone = pickZone(random, corruptedChance);
+    const field = ZONE_FIELD[zone];
+    chips.push({
+      id: `${fact.id}-${zone}-${index}`,
+      factId: fact.id,
+      zone,
+      text: fact[field],
+      evidenceLabel: fact.label,
     });
   }
 
-  return rounds;
+  return shuffle(chips, random);
 }
 
 export function getDeepVerifyBonus(roundIndex, total = TOTAL_ROUNDS) {
@@ -522,41 +377,15 @@ export function scoreCorrectAnswer(
   streak,
   deepVerify = false,
   deepVerifyBonus = DEEP_VERIFY_BONUS,
-  precisionMultiplier = 1,
 ) {
   const speedBonus = Math.round(clamp(remainingRatio, 0, 1) * 500);
   const streakBonus = clamp(streak, 0, 5) * 60;
   const wagerBonus = deepVerify ? deepVerifyBonus : 0;
-  return Math.round((500 + speedBonus + streakBonus + wagerBonus) * precisionMultiplier);
-}
-
-export function resolveLockPrecision(
-  markerRatio,
-  targetStart,
-  targetWidth,
-  perfectWidth = LOCK_PERFECT_WIDTH_RATIO,
-) {
-  const targetEnd = targetStart + targetWidth;
-  if (markerRatio < targetStart || markerRatio > targetEnd) return "miss";
-  const targetCenter = targetStart + targetWidth / 2;
-  const perfectStart = targetCenter - (targetWidth * perfectWidth) / 2;
-  const perfectEnd = targetCenter + (targetWidth * perfectWidth) / 2;
-  return markerRatio >= perfectStart && markerRatio <= perfectEnd ? "perfect" : "good";
-}
-
-export function precisionMultiplierFor(precision) {
-  if (precision === "perfect") return LOCK_PERFECT_MULTIPLIER;
-  if (precision === "miss") return LOCK_MISS_MULTIPLIER;
-  return 1;
+  return 500 + speedBonus + streakBonus + wagerBonus;
 }
 
 export function getWrongAnswerIntegrityLoss(deepVerify = false) {
   return deepVerify ? DEEP_VERIFY_INTEGRITY_LOSS : 1;
-}
-
-export function getRoundDuration(roundIndex, kind = "") {
-  const baseDuration = Math.max(12_000, ROUND_DURATION_MS - Math.max(0, roundIndex) * 1_000);
-  return baseDuration + (COMPLEX_ROUND_BONUS_MS[kind] ?? 0);
 }
 
 export function getRunDirective(runs = 0, fragments = 0) {
@@ -707,4 +536,27 @@ export function getResult({
 
 export function formatScore(score) {
   return String(Math.max(0, Math.round(score))).padStart(5, "0");
+}
+
+const RUN_STYLE_REMARKS = {
+  RECOVERY: "실수한 뒤에도 손을 놓지 않았어. 그게 나한테는 제일 오래 남아.",
+  RISK: "위험한 구역까지 계속 손을 뻗었지. 확신 없이는 못 하는 방식이야.",
+  PRECISION: "단 하나도 잘못 넣지 않았어. 손이 아니라 눈으로 이긴 런이었어.",
+  SPEED: "고민보다 손이 먼저 갔어. 그 속도, 나쁘지 않아.",
+};
+
+export function getRunStyleTag(stats = {}) {
+  const deepVerifyWins = Math.floor(Number(stats.deepVerifyWins) || 0);
+  const syncRecoveryUsed = Boolean(stats.syncRecoveryUsed);
+  const wrongCount = Math.floor(Number(stats.wrongCount) || 0);
+  const maxStreak = Math.floor(Number(stats.maxStreak) || 0);
+
+  if (syncRecoveryUsed) return "RECOVERY";
+  if (deepVerifyWins >= 2) return "RISK";
+  if (wrongCount === 0 && maxStreak > 0) return "PRECISION";
+  return "SPEED";
+}
+
+export function getRunStyleRemark(styleTag) {
+  return RUN_STYLE_REMARKS[styleTag] ?? "";
 }

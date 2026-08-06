@@ -9,23 +9,29 @@ import {
   RUN_DIRECTIVE_BONUS,
   SYNC_RECOVERY_STREAK,
   TOTAL_ROUNDS,
+  WAVE_CHIP_TARGET,
+  WAVE_CORRUPTED_CHANCE,
+  WAVE_MAX_CONCURRENT,
+  WAVE_SPAWN_INTERVAL_MS,
+  WAVE_TRAVEL_MS,
   awardMemoryFragment,
+  createChipPool,
   createFactCatalog,
   createRandom,
-  createRoundDeck,
-  getResult,
   getArchiveLensCharges,
   getAuditGateStatus,
-  getFragmentReward,
   getDeepVerifyBonus,
+  getFragmentReward,
   getMoriArchiveRecord,
-  getRoundDuration,
+  getResult,
   getRunDirective,
   getRunDirectiveStatus,
+  getRunStyleRemark,
+  getRunStyleTag,
   getSyncRecoveryIndex,
+  getWaveConfig,
+  getWaveDurationMs,
   getWrongAnswerIntegrityLoss,
-  precisionMultiplierFor,
-  resolveLockPrecision,
   scoreCorrectAnswer,
   seedFromString,
 } from "../src/game-logic.js";
@@ -108,169 +114,82 @@ test("cookie progression facts keep distinct options at their storage caps", () 
   }
 });
 
-test("seeded replay decks can surface every browser and cookie fact", () => {
-  const catalog = createFactCatalog(snapshot);
-  const factsByEvidence = new Map(catalog.map((fact) => [fact.evidenceText, fact.id]));
-  const seenFactIds = new Set();
-
-  for (let seedIndex = 0; seedIndex < 120; seedIndex += 1) {
-    const rounds = createRoundDeck(catalog, TOTAL_ROUNDS, seedFromString(`coverage-${seedIndex}`));
-    for (const round of rounds) {
-      for (const item of round.evidence) {
-        const evidenceText = item.text.split(" ↔ ")[0];
-        const factId = factsByEvidence.get(evidenceText);
-        if (factId) seenFactIds.add(factId);
-      }
-    }
+test("wave config arrays are sized for all six waves and escalate monotonically", () => {
+  for (const array of [WAVE_CHIP_TARGET, WAVE_SPAWN_INTERVAL_MS, WAVE_TRAVEL_MS, WAVE_MAX_CONCURRENT, WAVE_CORRUPTED_CHANCE]) {
+    assert.equal(array.length, TOTAL_ROUNDS);
+  }
+  for (let index = 1; index < TOTAL_ROUNDS; index += 1) {
+    assert.ok(WAVE_CHIP_TARGET[index] >= WAVE_CHIP_TARGET[index - 1]);
+    assert.ok(WAVE_SPAWN_INTERVAL_MS[index] <= WAVE_SPAWN_INTERVAL_MS[index - 1]);
+    assert.ok(WAVE_TRAVEL_MS[index] <= WAVE_TRAVEL_MS[index - 1]);
+    assert.ok(WAVE_MAX_CONCURRENT[index] >= WAVE_MAX_CONCURRENT[index - 1]);
+    assert.ok(WAVE_CORRUPTED_CHANCE[index] >= WAVE_CORRUPTED_CHANCE[index - 1]);
   }
 
-  assert.deepEqual(
-    [...seenFactIds].sort(),
-    catalog.map((fact) => fact.id).sort(),
-  );
-});
+  const config = getWaveConfig(2);
+  assert.equal(config.target, WAVE_CHIP_TARGET[2]);
+  assert.equal(config.spawnIntervalMs, WAVE_SPAWN_INTERVAL_MS[2]);
+  assert.equal(config.travelMs, WAVE_TRAVEL_MS[2]);
+  assert.equal(config.maxConcurrent, WAVE_MAX_CONCURRENT[2]);
+  assert.equal(config.corruptedChance, WAVE_CORRUPTED_CHANCE[2]);
 
-test("round deck preserves its difficulty curve with six distinct puzzle rules", () => {
-  const catalog = createFactCatalog(snapshot);
-  const rounds = createRoundDeck(catalog, TOTAL_ROUNDS, seedFromString("audit"));
-  assert.equal(rounds.length, TOTAL_ROUNDS);
-  assert.deepEqual(
-    new Set(rounds.slice(0, 4).map((round) => round.kind)),
-    new Set(["trace", "purge", "restore", "redact"]),
-  );
-  assert.deepEqual(
-    new Set(rounds.slice(4).map((round) => round.kind)),
-    new Set(["crosscheck", "checksum"]),
-  );
-  assert.equal(new Set(rounds.map((round) => round.kind)).size, TOTAL_ROUNDS);
+  assert.equal(getWaveConfig(-1).target, WAVE_CHIP_TARGET[0]);
+  assert.equal(getWaveConfig(999).target, WAVE_CHIP_TARGET.at(-1));
 
-  for (const round of rounds) {
-    assert.equal(round.statements.length, 3);
-    assert.equal(round.statements.filter((statement) => statement.isCorrect).length, 1);
-    assert.ok(round.prompt);
-    assert.ok(round.instruction);
-    assert.ok(round.explanation);
-    assert.ok(round.evidence.length >= 1);
-  }
-
-  const purgeRounds = rounds.filter((round) => round.kind === "purge");
-  assert.ok(purgeRounds.every((round) => (
-    round.statements.filter((statement) => statement.claim === "lie").length === 1
-  )));
-
-  const restoreRounds = rounds.filter((round) => round.kind === "restore");
-  assert.ok(restoreRounds.every((round) => (
-    round.statements.filter((statement) => statement.claim === "truth").length === 1
-  )));
-
-  const traceRounds = rounds.filter((round) => round.kind === "trace");
-  assert.ok(traceRounds.every((round) => (
-    new Set(round.statements.map((statement) => statement.claim)).size === 3
-  )));
-
-  const redactRound = rounds.find((round) => round.kind === "redact");
-  assert.equal(redactRound.evidence.length, 1);
-  assert.equal(redactRound.statements.find((statement) => statement.isCorrect).claim, "value");
-  assert.ok(redactRound.statements.every((statement) => statement.text.includes("=")));
-
-  const crosscheckRound = rounds.find((round) => round.kind === "crosscheck");
-  assert.equal(crosscheckRound.evidence.length, 2);
   assert.equal(
-    crosscheckRound.statements.find((statement) => statement.isCorrect).claim,
-    "verified-pair",
-  );
-  assert.ok(crosscheckRound.statements.every((statement) => statement.text.includes("·")));
-
-  const checksumRound = rounds.find((round) => round.kind === "checksum");
-  assert.equal(checksumRound.evidence.length, 3);
-  assert.ok(checksumRound.evidence.every((item) => item.text.includes("↔")));
-  assert.match(
-    checksumRound.statements.find((statement) => statement.isCorrect).text,
-    /^오염 필드 [123]개$/,
-  );
-  assert.deepEqual(
-    checksumRound.statements.map((statement) => statement.text).sort(),
-    ["오염 필드 1개", "오염 필드 2개", "오염 필드 3개"],
+    getWaveDurationMs(0),
+    Math.round(WAVE_CHIP_TARGET[0] * WAVE_SPAWN_INTERVAL_MS[0] * 1.8),
   );
 });
 
-test("different seeds vary puzzle order without moving complex rules forward", () => {
+test("chip pool draws only from the fact catalog's truth/lie/decoy fields and is seed-reproducible", () => {
   const catalog = createFactCatalog(snapshot);
-  const orders = new Set();
-  for (let seedIndex = 0; seedIndex < 24; seedIndex += 1) {
-    const rounds = createRoundDeck(
-      catalog,
-      TOTAL_ROUNDS,
-      seedFromString("order-" + seedIndex),
-    );
-    const kinds = rounds.map((round) => round.kind);
-    orders.add(kinds.join(","));
-    assert.deepEqual(
-      new Set(kinds.slice(0, 4)),
-      new Set(["trace", "purge", "restore", "redact"]),
-    );
-    assert.deepEqual(
-      new Set(kinds.slice(4)),
-      new Set(["crosscheck", "checksum"]),
-    );
-  }
-  assert.ok(orders.size >= 6);
-});
+  const factsById = new Map(catalog.map((fact) => [fact.id, fact]));
 
-test("round deck is reproducible for the same state and seed", () => {
-  const catalog = createFactCatalog(snapshot);
-  const seed = seedFromString("visit-2-run-1");
-  assert.deepEqual(
-    createRoundDeck(catalog, TOTAL_ROUNDS, seed),
-    createRoundDeck(catalog, TOTAL_ROUNDS, seed),
-  );
-});
-
-test("generated puzzle options stay unique and checksum evidence matches its answer", () => {
-  const catalog = createFactCatalog(snapshot);
-  for (let seedIndex = 0; seedIndex < 80; seedIndex += 1) {
-    const rounds = createRoundDeck(catalog, TOTAL_ROUNDS, seedFromString(`case-${seedIndex}`));
-    for (const round of rounds) {
-      assert.equal(round.statements.filter((statement) => statement.isCorrect).length, 1);
-      assert.equal(new Set(round.statements.map((statement) => statement.text)).size, 3);
-      assert.ok(round.evidence.every((item) => item.label && item.text));
+  for (let waveIndex = 0; waveIndex < TOTAL_ROUNDS; waveIndex += 1) {
+    const pool = createChipPool(catalog, waveIndex, "seed-a");
+    assert.ok(pool.length > 0);
+    for (const chip of pool) {
+      assert.ok(["true", "false", "corrupted"].includes(chip.zone));
+      const fact = factsById.get(chip.factId);
+      assert.ok(fact);
+      const expectedText = { true: fact.truthText, false: fact.lieText, corrupted: fact.decoyText }[chip.zone];
+      assert.equal(chip.text, expectedText);
     }
-
-    const checksumRound = rounds.find((round) => round.kind === "checksum");
-    const mismatches = checksumRound.evidence.filter((item) => {
-      const [evidenceText, indexedField] = item.text.split(" ↔ ");
-      const fact = catalog.find((candidate) => candidate.evidenceText === evidenceText);
-      const separator = indexedField.indexOf("=");
-      const candidateValue = indexedField.slice(separator + 1);
-      return fact.value !== candidateValue;
-    }).length;
-    const correctCount = Number.parseInt(
-      checksumRound.statements.find((statement) => statement.isCorrect).text.match(/\d+/)[0],
-      10,
-    );
-    assert.equal(correctCount, mismatches);
   }
+
+  assert.deepEqual(
+    createChipPool(catalog, 3, "reproduce-me"),
+    createChipPool(catalog, 3, "reproduce-me"),
+  );
+  assert.notDeepEqual(
+    createChipPool(catalog, 3, "seed-a").map((chip) => chip.id),
+    createChipPool(catalog, 3, "seed-b").map((chip) => chip.id),
+  );
+});
+
+test("corrupted chip chance rises across waves as configured", () => {
+  const catalog = createFactCatalog(snapshot);
+  const sampleCorruptedRatio = (waveIndex) => {
+    let corrupted = 0;
+    let total = 0;
+    for (let sample = 0; sample < 40; sample += 1) {
+      const pool = createChipPool(catalog, waveIndex, `sample-${sample}`);
+      corrupted += pool.filter((chip) => chip.zone === "corrupted").length;
+      total += pool.length;
+    }
+    return corrupted / total;
+  };
+
+  assert.equal(sampleCorruptedRatio(0), 0);
+  const laterRatio = sampleCorruptedRatio(5);
+  assert.ok(laterRatio > 0.15);
 });
 
 test("score rewards remaining time and streak without exceeding its cap", () => {
   assert.equal(scoreCorrectAnswer(0, 0), 500);
   assert.equal(scoreCorrectAnswer(1, 1), 1_060);
   assert.equal(scoreCorrectAnswer(1.5, 99), 1_300);
-});
-
-test("signal lock precision multiplier scales the same base score", () => {
-  assert.equal(scoreCorrectAnswer(0, 0, false, undefined, 1), 500);
-  assert.equal(scoreCorrectAnswer(0, 0, false, undefined, precisionMultiplierFor("perfect")), 600);
-  assert.equal(scoreCorrectAnswer(0, 0, false, undefined, precisionMultiplierFor("miss")), 250);
-  assert.equal(precisionMultiplierFor("good"), 1);
-});
-
-test("lock precision resolves perfect, good, and miss from marker position", () => {
-  assert.equal(resolveLockPrecision(0.5, 0.4, 0.2), "perfect");
-  assert.equal(resolveLockPrecision(0.42, 0.4, 0.2), "good");
-  assert.equal(resolveLockPrecision(0.6, 0.4, 0.2), "good");
-  assert.equal(resolveLockPrecision(0.3, 0.4, 0.2), "miss");
-  assert.equal(resolveLockPrecision(0.61, 0.4, 0.2), "miss");
 });
 
 test("deep verify adds a base wager and doubles an error's integrity loss", () => {
@@ -293,14 +212,6 @@ test("the final core doubles only the last round's deep verify reward", () => {
     scoreCorrectAnswer(1, 1, true, FINAL_CORE_DEEP_VERIFY_BONUS),
     1_760,
   );
-});
-
-test("complex rounds receive enough reading time while simple rounds get faster", () => {
-  assert.equal(getRoundDuration(0), 18_000);
-  assert.equal(getRoundDuration(5), 13_000);
-  assert.equal(getRoundDuration(999), 12_000);
-  assert.equal(getRoundDuration(4, "crosscheck"), 18_000);
-  assert.equal(getRoundDuration(5, "checksum"), 20_000);
 });
 
 test("run directives rotate and complete only at their stated thresholds", () => {
@@ -387,6 +298,16 @@ test("result rank distinguishes perfect, surviving, and failed audits", () => {
   assert.equal(getResult({ score: 4_000, correct: 5, integrity: 1 }).rank, "A");
   assert.equal(getResult({ score: 2_000, correct: 2, integrity: 1 }).rank, "C");
   assert.equal(getResult({ score: 4_000, correct: 5, integrity: 0 }).rank, "NULL");
+});
+
+test("run style tag picks the most distinctive way a run was played", () => {
+  assert.equal(getRunStyleTag({ syncRecoveryUsed: true, deepVerifyWins: 3 }), "RECOVERY");
+  assert.equal(getRunStyleTag({ deepVerifyWins: 2, wrongCount: 0, maxStreak: 5 }), "RISK");
+  assert.equal(getRunStyleTag({ deepVerifyWins: 0, wrongCount: 0, maxStreak: 5 }), "PRECISION");
+  assert.equal(getRunStyleTag({ deepVerifyWins: 0, wrongCount: 2, maxStreak: 3 }), "SPEED");
+  assert.equal(getRunStyleTag({}), "SPEED");
+  assert.ok(getRunStyleRemark("RECOVERY").length > 0);
+  assert.equal(getRunStyleRemark("unknown-tag"), "");
 });
 
 test("memory encoding round-trips only the allowed game fields", () => {
