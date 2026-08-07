@@ -1427,6 +1427,15 @@ kbd {
   letter-spacing: 0.05em;
 }
 
+.resource-strip {
+  display: block;
+  margin-top: 2px;
+  min-height: 1.1em;
+  color: var(--success);
+  font: 700 0.6rem/1.4 "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  letter-spacing: 0.05em;
+}
+
 .signal-field {
   position: relative;
   height: 280px;
@@ -1596,6 +1605,55 @@ kbd {
   animation: core-shatter 700ms ease-in forwards;
 }
 
+/* One dot per distinct held item, evenly spaced by --angle and slowly
+   revolving around the core — a running, at-a-glance readout of "how much
+   is stacked right now" that doesn't require reading the text summary. */
+.buff-orbit {
+  position: absolute;
+  inset: -54px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  pointer-events: none;
+  animation: orbit-spin 42s linear infinite;
+}
+
+.orbit-item {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 20px;
+  height: 20px;
+  margin: -10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: 1px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  background: color-mix(in srgb, var(--slate-950) 70%, var(--accent) 14%);
+  color: var(--accent);
+  font: 700 0.58rem/1 "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  transform: rotate(var(--angle)) translate(58px);
+}
+
+.orbit-badge {
+  position: absolute;
+  right: -4px;
+  bottom: -4px;
+  min-width: 12px;
+  padding: 0 2px;
+  border-radius: 6px;
+  background: var(--warm);
+  color: var(--slate-950);
+  font: 700 0.5rem/1.3 "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  text-align: center;
+}
+
+@keyframes orbit-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
 @keyframes core-breathe {
   0%, 100% { transform: translate(-50%, -50%) scale(1); }
   50% { transform: translate(-50%, -50%) scale(1.05); }
@@ -1679,6 +1737,10 @@ kbd {
   }
 
   .signal-field.is-shaking {
+    animation: none;
+  }
+
+  .buff-orbit {
     animation: none;
   }
 }

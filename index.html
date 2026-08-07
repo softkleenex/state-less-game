@@ -267,11 +267,12 @@
               <kbd aria-hidden="true">D</kbd>
             </button>
             <p class="sr-only" id="deep-verify-help">
-              런당 한 번, 5초 동안 정화 점수가 2배로 오르지만 오클릭 시 코어 손실도 2배가 됩니다.
+              기본 런당 한 번, 5초 동안 정화 점수가 2배로 오르지만 오클릭 시 코어 손실도 2배가 됩니다. 강화로 사용 횟수를 늘릴 수 있습니다.
             </p>
 
             <output class="wave-progress" id="wave-progress" aria-live="polite">정화 0 · 오클릭 0 · 놓침 0</output>
             <output class="active-buffs" id="active-buffs" aria-live="polite"></output>
+            <output class="resource-strip" id="resource-strip" aria-live="polite" hidden></output>
 
             <div
               class="signal-field"
@@ -283,6 +284,7 @@
                 <span class="core-crack"></span>
                 <span class="core-glow"></span>
                 <span class="core-mark">MORI</span>
+                <ul class="buff-orbit" id="buff-orbit" aria-hidden="true"></ul>
               </div>
               <div class="combo-callout" id="combo-callout" aria-hidden="true"></div>
               <div class="buff-pick-overlay" id="buff-pick-overlay" role="group" aria-label="런 강화 선택" hidden>

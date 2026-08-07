@@ -10,66 +10,98 @@ export const WRONG_CLICK_LOSS_DEEP_VERIFY = 2;
 export const DEEP_VERIFY_WINDOW_MS = 5_000;
 export const LENS_BOOST_MS = 4_000;
 export const LENS_EXTEND_BONUS_MS = 700;
-export const BUFF_PICK_TRIGGERS_MS = [15_000, 30_000, 45_000];
+export const BUFF_PICK_FIRST_MS = 7_000;
+export const BUFF_PICK_INTERVAL_MS = 6_500;
+export const BUFF_PICK_END_BUFFER_MS = 1_500;
 export const BUFF_CHOICES_PER_PICK = 2;
-export const RUN_BUFF_POOL_SIZE = BUFF_PICK_TRIGGERS_MS.length * BUFF_CHOICES_PER_PICK;
 
-// The pool is bigger than one run needs (RUN_BUFF_POOL_SIZE buffs get drawn
-// out of everything unlocked): a run only ever sees a random subset, so the
-// three pairs offered are a different mix each time instead of the same six
-// trade-offs in a different order. `unlock.minFragments` gates the two
-// higher-variance buffs behind having recovered a couple of memory fragments
-// already, so a first-time run only ever sees the safer basics. None of
-// these are pure power-ups — every one gives something and takes something,
-// so the choice itself is the point, not just "pick the biggest number."
+// Picks repeat on a cadence for the whole run instead of stopping after
+// three — a 60s run gets roughly eight of them. Values past durationMs -
+// BUFF_PICK_END_BUFFER_MS are dropped so a pick never opens right at the
+// buzzer with no time left to act on it.
+export function getBuffPickTriggers(
+  durationMs = RUN_DURATION_MS,
+  firstMs = BUFF_PICK_FIRST_MS,
+  intervalMs = BUFF_PICK_INTERVAL_MS,
+) {
+  const triggers = [];
+  for (let t = firstMs; t <= durationMs - BUFF_PICK_END_BUFFER_MS; t += intervalMs) {
+    triggers.push(t);
+  }
+  return triggers;
+}
+
+// Unlike a typical roguelite, there is no cap on how many items a run can
+// hold: the same item can be offered and picked again, and its effects
+// stack every time (see `chooseBuff` in main.js, which folds every numeric
+// field into a running total). That is the deliberate point of difference
+// from genre references like Vampire Survivors — no slot limit, no
+// replacing an old pick to make room for a new one. Because stacking is
+// unlimited, every consuming call site clamps its own math to a sane floor
+// (see `scorePurge` below and the spawn/lifespan call sites in main.js) so
+// ten copies of the same item can never divide-by-zero or invert a
+// mechanic, only approach a limit. `unlock.minFragments` gates a handful of
+// higher-variance items behind having recovered a couple of memory
+// fragments already, so a first-time run only ever sees the safer basics.
+// None of these are pure power-ups — every one gives something and takes
+// something, so the choice itself is the point, not just "pick the biggest
+// number."
 export const BUFF_DEFINITIONS = [
   {
     id: "combo-focus",
     name: "콤보 특화",
     description: "콤보 보너스 +50%, 오클릭 시 코어 무결성 추가 -1",
     effects: { comboScale: 0.5, wrongLossBonus: 1 },
+    moriLine: "몰아치고 싶으면 몰아쳐. 대신 삐끗하면 두 배로 아파.",
   },
   {
     id: "safe-hands",
     name: "안전한 손",
     description: "오클릭 코어 무결성 손실 -1(최소 1), 정화 점수 -10%",
     effects: { wrongLossBonus: -1, scoreScale: -0.1 },
+    moriLine: "손 떨리면 이걸로 가. 대신 값은 좀 짜게 받을 거야.",
   },
   {
     id: "slow-burn",
     name: "여유 확보",
     description: "신호 지속시간 +20%, 동시 등장 최대 개수 +1",
     effects: { lifespanScale: 0.2, concurrentBonus: 1 },
+    moriLine: "숨 돌릴 시간은 늘렸는데, 화면은 더 복잡해질 거야.",
   },
   {
     id: "high-stakes",
     name: "고위험 배팅",
     description: "DEEP VERIFY 지속시간 +3초, 발동 시 진짜 신호 1개 즉시 추가 등장",
     effects: { deepVerifyWindowBonusMs: 3_000, deepVerifySpawnGenuine: true },
+    moriLine: "확신 있으면 오래 걸어봐. 그만큼 함정도 하나 더 깔았어.",
   },
   {
     id: "lens-mastery",
     name: "렌즈 숙련",
     description: "ARCHIVE LENS 충전 +1, 지속시간 -1초",
     effects: { lensChargeBonus: 1, lensDurationBonusMs: -1_000 },
+    moriLine: "렌즈는 하나 더 줄게. 대신 한 번 켤 때 짧게 봐야 해.",
   },
   {
     id: "core-plating",
     name: "코어 보강",
     description: "코어 무결성 즉시 1칸 회복, 콤보 보너스 -20%",
     effects: { healIntegrity: 1, comboScale: -0.2 },
+    moriLine: "일단 채워줄게. 대신 몰아치는 맛은 좀 죽어.",
   },
   {
     id: "backdraft",
     name: "역풍",
     description: "정화 점수 +25%, 동시 등장 최대 개수 -1",
     effects: { scoreScale: 0.25, concurrentBonus: -1 },
+    moriLine: "값은 올려줄게. 대신 동시에 볼 건 줄어들어.",
   },
   {
     id: "cold-focus",
     name: "냉정 유지",
     description: "콤보 보너스 -30%, DEEP VERIFY 지속시간 +2초",
     effects: { comboScale: -0.3, deepVerifyWindowBonusMs: 2_000 },
+    moriLine: "몰아치기보단 침착하게 가는 쪽이야.",
   },
   {
     id: "signal-warp",
@@ -77,6 +109,7 @@ export const BUFF_DEFINITIONS = [
     description: "진짜 신호 비율 +12%p, 정화 점수 +15%",
     effects: { genuineChanceBonus: 0.12, scoreScale: 0.15 },
     unlock: { minFragments: 2 },
+    moriLine: "진짜가 더 많아질 거야. 그래도 값은 후하게 쳐줄게.",
   },
   {
     id: "rapid-fire",
@@ -84,6 +117,266 @@ export const BUFF_DEFINITIONS = [
     description: "신호 등장 간격 -18%, 신호 지속시간 -15%",
     effects: { spawnIntervalScale: -0.18, lifespanScale: -0.15 },
     unlock: { minFragments: 2 },
+    moriLine: "더 빨리, 더 짧게. 손이 못 따라가면 그건 내 알 바 아니야.",
+  },
+  {
+    id: "guardian-ward",
+    name: "보호막",
+    description: "다음 오클릭 1회를 완전히 무효화하는 보호막 1개 획득, 정화 점수 -8%",
+    effects: { shieldCharges: 1, scoreScale: -0.08 },
+    moriLine: "이번 실수는 내가 대신 맞아줄게. 그래도 정산은 좀 짜게 할 거야.",
+  },
+  {
+    id: "second-wind",
+    name: "두 번째 숨",
+    description: "코어가 파괴될 위기에 무결성 1칸으로 단 1회 부활, 이후 오클릭 손실 +1",
+    effects: { reviveCharges: 1, wrongLossBonus: 1 },
+    unlock: { minFragments: 4 },
+    moriLine: "한 번은 다시 살려줄게. 그다음부터는 진짜 봐줄 사람이 없어.",
+  },
+  {
+    id: "chain-reaction",
+    name: "연쇄 반응",
+    description: "가짜 정화 시 20% 확률로 다른 가짜 하나도 자동 정화, 콤보 배율 -15%",
+    effects: { chainClearChance: 0.2, comboScale: -0.15 },
+    moriLine: "하나 지우면 옆도 같이 지워질 수 있어. 대신 몰아치는 맛은 줄었어.",
+  },
+  {
+    id: "milestone-cache",
+    name: "마일스톤 캐시",
+    description: "콤보 4/8/12 달성마다 +80점 고정 보너스, 진짜 신호 비율 +6%p",
+    effects: { milestoneScoreBonus: 80, genuineChanceBonus: 0.06 },
+    moriLine: "고비마다 따로 챙겨줄게. 대신 진짜가 더 자주 섞여 나올 거야.",
+  },
+  {
+    id: "wager-addict",
+    name: "베팅 중독",
+    description: "DEEP VERIFY 1회 추가 사용 가능, 오클릭 손실 +1",
+    effects: { extraDeepVerifyUse: 1, wrongLossBonus: 1 },
+    unlock: { minFragments: 2 },
+    moriLine: "한 번 더 걸게 해줄게. 그만큼 실수의 값도 계속 올라가.",
+  },
+  {
+    id: "overclocked-ward",
+    name: "과부하 보호막",
+    description: "보호막 1개 획득, 신호 등장 간격 -10%",
+    effects: { shieldCharges: 1, spawnIntervalScale: -0.1 },
+    moriLine: "막아주는 대신, 더 몰아붙일게.",
+  },
+  {
+    id: "combo-overdrive",
+    name: "콤보 오버드라이브",
+    description: "콤보 점수 배율 +40%, 오클릭 손실 +1",
+    effects: { comboScale: 0.4, wrongLossBonus: 1 },
+    moriLine: "화려하게 가고 싶으면, 넘어질 때도 화려하게 넘어져.",
+  },
+  {
+    id: "combo-tunnel-vision",
+    name: "콤보 터널비전",
+    description: "콤보 점수 배율 +35%, DEEP VERIFY 지속시간 -1.2초",
+    effects: { comboScale: 0.35, deepVerifyWindowBonusMs: -1_200 },
+    moriLine: "콤보에 눈이 팔리니까, 딴 데 살펴볼 여유가 줄었네.",
+  },
+  {
+    id: "score-surge",
+    name: "점수 서지",
+    description: "정화 점수 +25%, 오클릭 손실 +1",
+    effects: { scoreScale: 0.25, wrongLossBonus: 1 },
+    moriLine: "더 챙겨줄게. 대신 실수하면 더 크게 깎여.",
+  },
+  {
+    id: "flat-rate-cash",
+    name: "플랫레이트 캐시",
+    description: "정화 점수 +30%, 콤보 배율 -25%",
+    effects: { scoreScale: 0.3, comboScale: -0.25 },
+    moriLine: "매번 확실히 벌게 해줄게. 몰아치는 맛은 좀 죽었어.",
+  },
+  {
+    id: "chain-detonator",
+    name: "체인 디토네이터",
+    description: "연쇄 정화 확률 +20%, 정화 점수 -10%",
+    effects: { chainClearChance: 0.2, scoreScale: -0.1 },
+    moriLine: "하나 건드리면 옆도 같이 터져. 근데 한 개당 값은 낮아졌어.",
+  },
+  {
+    id: "snowball-risk",
+    name: "스노우볼 리스크",
+    description: "연쇄 정화 확률 +15%, 오클릭 손실 +1",
+    effects: { chainClearChance: 0.15, wrongLossBonus: 1 },
+    moriLine: "번지는 재미는 있는데, 넘어지면 그만큼 아파.",
+  },
+  {
+    id: "milestone-jackpot",
+    name: "마일스톤 잭팟",
+    description: "콤보 마일스톤(4/8/12) 달성 시 +100점, 콤보 배율 -30%",
+    effects: { milestoneScoreBonus: 100, comboScale: -0.3 },
+    moriLine: "고비마다 크게 챙겨줄게. 그 사이는 좀 심심할 거야.",
+  },
+  {
+    id: "milestone-overclock",
+    name: "마일스톤 오버클럭",
+    description: "콤보 마일스톤 달성 시 +130점, 오클릭 손실 +1",
+    effects: { milestoneScoreBonus: 130, wrongLossBonus: 1 },
+    moriLine: "정점에서 크게 터질게. 실수도 그만큼 크게 터질 거고.",
+  },
+  {
+    id: "verify-gambler",
+    name: "베리파이 갬블러",
+    description: "DEEP VERIFY 지속시간 +1.5초, 오클릭 손실 +1",
+    effects: { deepVerifyWindowBonusMs: 1_500, wrongLossBonus: 1 },
+    moriLine: "판단할 시간 늘려줄게. 대신 걸린 값도 늘었어.",
+  },
+  {
+    id: "slow-verify-discount",
+    name: "슬로우 베리파이",
+    description: "DEEP VERIFY 지속시간 +2초, 정화 점수 -10%",
+    effects: { deepVerifyWindowBonusMs: 2_000, scoreScale: -0.1 },
+    moriLine: "오래 들여다볼 시간은 주는데, 개당 값은 깎였어.",
+  },
+  {
+    id: "emergency-barrier",
+    name: "긴급 차단막",
+    description: "보호막 2개 획득, 신호 지속시간 -15%",
+    effects: { shieldCharges: 2, lifespanScale: -0.15 },
+    moriLine: "막아줄게, 대신 시간은 안 봐줘.",
+  },
+  {
+    id: "last-backup-core",
+    name: "최후의 백업 코어",
+    description: "코어가 파괴될 위기에 단 1회 부활, 신호 지속시간 -25%",
+    effects: { reviveCharges: 1, lifespanScale: -0.25 },
+    unlock: { minFragments: 4 },
+    moriLine: "한 번은 살려줄게. 그다음부턴 나도 몰라.",
+  },
+  {
+    id: "archive-reserve-permit",
+    name: "보관소 예비열람권",
+    description: "ARCHIVE LENS 충전 +1, 동시 등장 최대 개수 -1",
+    effects: { lensChargeBonus: 1, concurrentBonus: -1 },
+    moriLine: "렌즈는 더 줄게. 대신 화면은 좀 심심해질 거야.",
+  },
+  {
+    id: "emergency-suture",
+    name: "긴급 봉합",
+    description: "코어 무결성 즉시 1칸 회복, 진짜 신호 비율 +8%p",
+    effects: { healIntegrity: 1, genuineChanceBonus: 0.08 },
+    moriLine: "꿰맸어. 근데 앞으로 진짜가 더 자주 보일 거야, 조심해.",
+  },
+  {
+    id: "multi-scanner-array",
+    name: "다중 스캐너 배열",
+    description: "동시 등장 최대 개수 +1, 신호 지속시간 -10%",
+    effects: { concurrentBonus: 1, lifespanScale: -0.1 },
+    moriLine: "더 많이 보여줄게. 대신 오래 안 기다려.",
+  },
+  {
+    id: "focus-filter",
+    name: "집중 필터",
+    description: "동시 등장 최대 개수 -1, 신호 지속시간 +20%",
+    effects: { concurrentBonus: -1, lifespanScale: 0.2 },
+    moriLine: "하나씩만 보여줄게. 그러니까 놓치지 마.",
+  },
+  {
+    id: "deep-archive-lens",
+    name: "심층 열람 렌즈",
+    description: "ARCHIVE LENS 지속시간 +1.2초, 진짜 신호 비율 +10%p",
+    effects: { lensDurationBonusMs: 1_200, genuineChanceBonus: 0.1 },
+    moriLine: "더 오래 들여다보게 해줄게. 근데 진짜가 늘어날 거야.",
+  },
+  {
+    id: "buffer-barrier",
+    name: "완충 배리어",
+    description: "보호막 1개 획득, 동시 등장 최대 개수 -1",
+    effects: { shieldCharges: 1, concurrentBonus: -1 },
+    moriLine: "한 번은 감싸줄게. 대신 기회는 줄어.",
+  },
+  {
+    id: "informant-network",
+    name: "정보원 네트워크",
+    description: "가짜 신호 비율 +10%p, 신호 지속시간 -15%",
+    effects: { genuineChanceBonus: -0.1, lifespanScale: -0.15 },
+    moriLine: "가짜를 더 많이 흘려줄게. 잡을 시간은 줄었지만.",
+  },
+  {
+    id: "lens-reserve-bank",
+    name: "예비 렌즈 뱅크",
+    description: "ARCHIVE LENS 충전 +2, 신호 지속시간 -15%",
+    effects: { lensChargeBonus: 2, lifespanScale: -0.15 },
+    moriLine: "렌즈는 넉넉하게 채워줄게. 그만큼 밖은 더 빡빡해질 거야.",
+  },
+  {
+    id: "acceleration-pact",
+    name: "가속 협정",
+    description: "신호 등장 간격 -20%, 연쇄 정화 확률 +12%",
+    effects: { spawnIntervalScale: -0.2, chainClearChance: 0.12 },
+    moriLine: "빨라진 만큼 정신 차려. 못 따라가면 그건 네 몫이야.",
+  },
+  {
+    id: "dual-verify-warrant",
+    name: "이중 열람권",
+    description: "DEEP VERIFY 1회 추가 사용 가능, 발동마다 진짜 신호 강제 등장",
+    effects: { extraDeepVerifyUse: 1, deepVerifySpawnGenuine: true },
+    unlock: { minFragments: 2 },
+    moriLine: "한 번 더 걸 수 있어. 대신 매번 진짜 하나씩 끼워줄게.",
+  },
+  {
+    id: "camouflage-overload",
+    name: "위장 폭주",
+    description: "진짜 신호 비율 +12%p, 연쇄 정화 확률 +15%",
+    effects: { genuineChanceBonus: 0.12, chainClearChance: 0.15 },
+    unlock: { minFragments: 2 },
+    moriLine: "가짜가 줄었어. 걸리면 크게 걸리겠지만.",
+  },
+  {
+    id: "narrow-corridor",
+    name: "협소 회랑",
+    description: "동시 등장 최대 개수 -1, 진짜 신호 비율 -10%p",
+    effects: { concurrentBonus: -1, genuineChanceBonus: -0.1 },
+    moriLine: "판이 좁아졌어. 놓칠 것도 별로 없을 거야.",
+  },
+  {
+    id: "milestone-gambit",
+    name: "낙차 도박",
+    description: "콤보 마일스톤 달성 시 +90점, 진짜 신호 비율 +10%p",
+    effects: { milestoneScoreBonus: 90, genuineChanceBonus: 0.1 },
+    moriLine: "콤보까지 가면 크게 준다. 가는 길이 문제지.",
+  },
+  {
+    id: "high-tide-alert",
+    name: "만조 경보",
+    description: "동시 등장 최대 개수 +2, 진짜 신호 비율 +15%p",
+    effects: { concurrentBonus: 2, genuineChanceBonus: 0.15 },
+    unlock: { minFragments: 2 },
+    moriLine: "자리는 늘었어. 진짜도 늘었으니 눈 크게 떠.",
+  },
+  {
+    id: "re-verification-accord",
+    name: "재열람 협약",
+    description: "DEEP VERIFY 1회 추가 사용 가능, 신호 등장 간격 +20%",
+    effects: { extraDeepVerifyUse: 1, spawnIntervalScale: 0.2 },
+    unlock: { minFragments: 2 },
+    moriLine: "한 번 더 확인할 기회. 그동안 신호는 느긋해질 거야, 너무 느긋하게.",
+  },
+  {
+    id: "chain-vow",
+    name: "연쇄 서약",
+    description: "연쇄 정화 확률 +20%, 동시 등장 최대 개수 +1",
+    effects: { chainClearChance: 0.2, concurrentBonus: 1 },
+    moriLine: "하나 건드리면 옆도 무너져. 판도 같이 붐빌 거고.",
+  },
+  {
+    id: "slow-trap",
+    name: "저속 함정",
+    description: "신호 등장 간격 +25%, 진짜 신호 비율 +12%p",
+    effects: { spawnIntervalScale: 0.25, genuineChanceBonus: 0.12 },
+    moriLine: "느려졌어. 근데 대부분 손대면 안 되는 것들이야.",
+  },
+  {
+    id: "double-signature-verify",
+    name: "이중 서명 열람",
+    description: "DEEP VERIFY 발동 시 진짜 신호 강제 등장, 콤보 마일스톤 보너스 +70점",
+    effects: { deepVerifySpawnGenuine: true, milestoneScoreBonus: 70 },
+    moriLine: "이제 그 순간마다 진짜가 하나 껴. 콤보 보너스로 갚을게.",
   },
 ];
 
@@ -231,11 +524,17 @@ export function pickSignalKind(random = Math.random, genuineChance = GENUINE_CHA
 // Speed rewards reacting close to spawn, combo rewards an unbroken run of
 // correct purges; a `multiplier` of 2 is how the DEEP VERIFY wager window
 // pays out, and costs double on a mistake via getWrongClickLoss.
+// comboScale/scoreScale can accumulate from an unbounded number of stacked
+// item picks in one run, so the effective multiplier is floored here rather
+// than left to go negative — stacking a debuff-heavy item many times can
+// only push a bonus toward zero, never invert it into a penalty.
 export function scorePurge(remainingRatio, combo, multiplier = 1, modifiers = {}) {
   const { comboScale = 0, scoreScale = 0 } = modifiers;
+  const comboMultiplier = Math.max(0, 1 + comboScale);
+  const scoreMultiplier = Math.max(0.15, 1 + scoreScale);
   const speedBonus = Math.round(clamp(remainingRatio, 0, 1) * 150);
-  const comboBonus = Math.round(clamp(Math.floor(combo), 0, 12) * 20 * (1 + comboScale));
-  const base = Math.round((100 + speedBonus + comboBonus) * (1 + scoreScale));
+  const comboBonus = Math.round(clamp(Math.floor(combo), 0, 12) * 20 * comboMultiplier);
+  const base = Math.round((100 + speedBonus + comboBonus) * scoreMultiplier);
   return Math.round(base * multiplier);
 }
 

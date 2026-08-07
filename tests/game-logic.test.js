@@ -4,10 +4,11 @@ import assert from "node:assert/strict";
 import {
   BUFF_CHOICES_PER_PICK,
   BUFF_DEFINITIONS,
-  BUFF_PICK_TRIGGERS_MS,
+  BUFF_PICK_END_BUFFER_MS,
+  BUFF_PICK_FIRST_MS,
+  BUFF_PICK_INTERVAL_MS,
   GENUINE_CHANCE,
   MAX_MEMORY_FRAGMENTS,
-  RUN_BUFF_POOL_SIZE,
   RUN_DIRECTIVE_BONUS,
   RUN_DURATION_MS,
   SLOT_COUNT,
@@ -16,6 +17,7 @@ import {
   awardMemoryFragment,
   createRandom,
   getArchiveLensCharges,
+  getBuffPickTriggers,
   getFragmentReward,
   getMaxConcurrentSignals,
   getMoriArchiveRecord,
@@ -118,12 +120,20 @@ test("buff modifiers scale purge scoring without breaking the unmodified default
   );
 });
 
-test("the buff pool offers exactly two distinct trade-offs at each of three run milestones", () => {
-  assert.equal(BUFF_PICK_TRIGGERS_MS.length, 3);
+test("buff picks repeat on a cadence for the whole run instead of stopping after a fixed count", () => {
   assert.equal(BUFF_CHOICES_PER_PICK, 2);
-  assert.equal(RUN_BUFF_POOL_SIZE, BUFF_PICK_TRIGGERS_MS.length * BUFF_CHOICES_PER_PICK);
-  assert.ok(BUFF_DEFINITIONS.length >= RUN_BUFF_POOL_SIZE);
+  const triggers = getBuffPickTriggers(RUN_DURATION_MS);
+  assert.ok(triggers.length >= 6, "a 60s run should offer well more than the old fixed three picks");
+  assert.equal(triggers[0], BUFF_PICK_FIRST_MS);
+  for (let index = 1; index < triggers.length; index += 1) {
+    assert.equal(triggers[index] - triggers[index - 1], BUFF_PICK_INTERVAL_MS);
+  }
+  assert.ok(triggers.at(-1) <= RUN_DURATION_MS - BUFF_PICK_END_BUFFER_MS);
+  // A short run yields no picks rather than one crammed right at the end.
+  assert.deepEqual(getBuffPickTriggers(5_000), []);
+
   assert.equal(new Set(BUFF_DEFINITIONS.map((buff) => buff.id)).size, BUFF_DEFINITIONS.length);
+  assert.ok(BUFF_DEFINITIONS.length >= 30, "the pool should be large — unlimited stacking is the point");
   for (const buff of BUFF_DEFINITIONS) {
     assert.ok(buff.name.length > 0);
     assert.ok(buff.description.length > 0);
@@ -137,10 +147,18 @@ test("locked buffs only join the pool once enough memory fragments are recovered
 
   const zeroFragmentIds = getUnlockedBuffDefinitions(0).map((buff) => buff.id);
   lockedIds.forEach((id) => assert.ok(!zeroFragmentIds.includes(id)));
-  assert.ok(zeroFragmentIds.length >= RUN_BUFF_POOL_SIZE);
+  assert.ok(zeroFragmentIds.length >= BUFF_CHOICES_PER_PICK);
 
   const maxFragmentIds = getUnlockedBuffDefinitions(MAX_MEMORY_FRAGMENTS).map((buff) => buff.id);
   lockedIds.forEach((id) => assert.ok(maxFragmentIds.includes(id)));
+});
+
+test("purge scoring floors comboScale/scoreScale instead of letting stacked debuffs invert them", () => {
+  const base = scorePurge(1, 8);
+  assert.ok(scorePurge(1, 8, 1, { comboScale: -50 }) > 0);
+  assert.equal(scorePurge(1, 8, 1, { comboScale: -50 }), scorePurge(1, 8, 1, { comboScale: -1 }));
+  assert.ok(scorePurge(1, 8, 1, { scoreScale: -50 }) > 0);
+  assert.ok(scorePurge(1, 8, 1, { scoreScale: -50 }) < base);
 });
 
 test("run directives rotate and complete only at their stated thresholds", () => {

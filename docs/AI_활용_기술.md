@@ -302,6 +302,37 @@ SIGNAL STRIKE로 재설계한 뒤 참여자가 직접 플레이해보고, 게임
 - `prefers-reduced-motion` 환경에서는 타이핑 애니메이션과 커서를 모두 건너뛰고 최종 텍스트를 즉시 표시(이전 애니메이션들과 동일한 규칙)
 - Puppeteer로 검증: 인트로 진입 후 300ms 시점에 본문이 실제로 부분 문자열 상태인지, 타이핑 도중에도 정책 선택 버튼이 `disabled`가 아닌지, 타이핑이 끝난 뒤 최종 문장이 원래 의도한 전체 텍스트와 일치하는지 확인 — 콘솔 에러 0건
 
+### 아이템(강화) 무제한 확장: "뱀서류처럼, 근데 개수 제한 없이"
+
+> 아이템(업그레이드)를 좀더 다방면으로 만들어버리는건 어때...? 뱀서류 처럼 하는거지.
+
+> 시간은신경쓰지마, ai agents를 통해서 충분히 작업 가능해, 얼마든지.
+
+> 특정상황마다 모리가 대사도 치고, 뱀서류랑 다른건 아이템 (혹은업그레이드)_개수에 제한은아예없는걸 특징으로 삼자. 아이템(업그레이드)를 엄청 많이 만들어야겠지.
+
+강화 시스템이 이미 있었는데도, 참여자가 "더 다방면으로, 뱀서류(Vampire Survivors류)처럼"라는 방향을 제안함. 다만 60초 단일 런에 뱀서라이크의 수십 종 무기·시너지·수십 분 축적 리듬을 그대로 옮기는 건 이 게임 구조와 맞지 않는다고 판단해, 먼저 절충안을 제시하고 확인받음(강화 수 확장/스택 도입 vs 그대로 유지) — 참여자가 "시간 신경 쓰지 말고 에이전트로 얼마든지"라고 답하며 스케일을 키우는 쪽으로 확정. 뒤이어 "뱀서류와 다른 건 개수 제한이 아예 없는 것"이라는 명시적 차별점과 "MORI가 상황마다 대사를 친다"는 요구가 추가됨.
+
+**설계 결정**: 15/30/45초 3회·6종 소진형이던 강화 픽을 **7초부터 6.5초 간격으로 반복되는 픽(60초 런에 약 8회)**으로 바꾸고, **같은 강화를 몇 번이든 다시 뽑아 무제한으로 스택**할 수 있게 함(`getBuffPickTriggers`). 뱀서라이크와의 차이점을 "슬롯 제한 없음, 교체 없음"으로 명시적으로 삼음.
+
+**콘텐츠 생성**: 병렬 서브에이전트 3개(공격/점수형, 방어/자원형, 와일드카드/템포형, 각 10종)에 허용된 effects 필드 목록과 "모든 강화는 업사이드와 다운사이드를 반드시 함께 가진다"는 기존 원칙을 프롬프트에 명시해 초안을 받고, 참여자를 대신해 직접 검수함 — 필드 오남용(존재하지 않는 키 사용), 업사이드만 있는 항목, 밸런스가 과한 조합을 확인해 전부 통과시킴(불합격 항목 없음, 문구만 일부 다듬음). 여기에 새 메커닉 6종(보호막·부활·연쇄 반응·마일스톤 고정 보너스·DEEP VERIFY 추가 사용권 2종)은 런타임 로직이 필요해 참여자가 직접 설계·구현함. 최종 강화 풀은 10(기존)+6(신규 메커닉)+30(에이전트 초안) = 46종.
+
+**새 메커닉 5종**(순수 숫자 재조합이 아닌 새 동작):
+- `shieldCharges`: 다음 오클릭을 완전히 무효화(무결성 손실 없음, 콤보 유지, `wrongClicks` 통계에도 반영 안 됨 — 온전히 없었던 일로 처리)
+- `reviveCharges`: 코어 파괴 시 1회 무결성 1칸으로 부활
+- `chainClearChance`: 가짜 정화 시 확률적으로 다른 가짜 하나를 자동 정화(스노우볼)
+- `milestoneScoreBonus`: 콤보 4/8/12 달성마다 고정 점수 보너스
+- `extraDeepVerifyUse`: 기본 런당 1회이던 DEEP VERIFY 사용 횟수를 늘림
+
+**무제한 스택의 안전장치**: 상한 없는 반복 픽이 게임을 깨뜨리지 않도록, 강화 개수를 제한하는 대신 매 계산식에 하한선을 둠 — `scorePurge`의 `comboScale`/`scoreScale` 유효 배율은 각각 0과 0.15 이하로 못 내려가고, 신호 지속시간은 220ms, 스폰 간격은 90ms 밑으로 못 내려가며, DEEP VERIFY 창은 1초 밑으로 못 줄어듦. 즉 디버프를 아무리 많이 쌓아도 "매우 나빠짐"까지만 가고 수학적으로 뒤집히거나 0으로 나누는 상태는 나오지 않음.
+
+**UI**: 강화 텍스트 요약에 스택 횟수를 표시(`콤보 오버드라이브 ×2`)하고, 코어 주위로 보유한 강화마다 점 하나씩이 천천히 도는 `#buff-orbit` 링을 추가해 "지금 얼마나 쌓였는지"를 텍스트를 읽지 않아도 한눈에 보이게 함. 보호막·부활 보유량은 별도 `#resource-strip`에 표시.
+
+**MORI 대사**: 46종 강화 전부에 `moriLine`(1인칭 반말 반응 한 줄)을 채워, 강화를 고를 때마다 `pulseMoriState`로 그 강화에 맞는 짧은 반응이 뜨도록 연결 — "상황마다 대사를 친다"는 요구를 강화 46종 전체에 적용함.
+
+**검증 중 발견한 버그**: Puppeteer로 보호막을 직접 고른 뒤 진짜 신호를 클릭해 소모되는지 확인하는 과정에서, `runtime.shieldCharges`는 실제로 정확히 소모되고 있었지만 화면의 `#resource-strip`(보유 자원 표시)이 픽 시점 이후로는 다시 그려지지 않아 소모가 화면에 반영되지 않는 버그를 발견함. 원인은 `updateActiveBuffsReadout()`가 강화를 고른 순간에만 호출되고, 실제 소모가 일어나는 `activateSlot` 경로에서는 호출되지 않았던 것 — `updateHud()`(모든 정화·오클릭마다 호출됨) 안에서 함께 호출하도록 한 줄 추가해 고침. 이 버그는 게임 로직 자체가 아니라 화면 갱신 누락이었고, Puppeteer로 "고른 직후"와 "소모 직후"를 둘 다 스냅숏 비교하지 않았다면 통과했을 문제라, 그냥 "동작한다"로 넘기지 않고 전/후 상태를 직접 대조한 것이 실제로 버그를 잡아낸 경우임.
+
+**검증**: 60초 런 전체를 자동 플레이해 실제로 약 8회의 강화 픽이 반복 간격대로 열리는지, 같은 강화를 두 번 골랐을 때 텍스트 요약과 오빗 링 배지에 `×2`가 정확히 반영되는지 확인(실측: 8회 픽, `콤보 오버드라이브 ×2` 포함 7개 항목, 오빗 점 7개·배지 1개로 정확히 일치, 최종 점수 55,007·S랭크). 별도로 보호막을 골라 실제 오클릭을 막는지(무결성·오클릭 수 불변, 보유량 정확히 감소), DEEP VERIFY 추가 사용권을 골라 런당 두 번째 발동이 실제로 가능한지(`disabled` 해제, 두 번째 발동 후에도 `active` 상태 전환)를 각각 실제 브라우저에서 재확인 — 두 시나리오 모두 콘솔 에러 0건.
+
 ## 3. AI가 지원한 구현 영역
 
 ### 기획
@@ -376,13 +407,17 @@ SIGNAL STRIKE로 재설계한 뒤 참여자가 직접 플레이해보고, 게임
 
 ### 로그라이트 강화 선택
 
-`gameLoop`는 매 프레임 `maybeTriggerBuffPick(elapsedMs)`도 확인합니다 — `BUFF_PICK_TRIGGERS_MS`(15,000/30,000/45,000ms) 중 아직 지나지 않은 첫 값에 도달하면 `openBuffPick()`을 호출하고 그 프레임의 나머지 처리(슬롯 만료·스폰·시간 표시)를 건너뜁니다. `openBuffPick`은 `runtime.locked = true`로 게임을 멈추고, 아직 제시되지 않은 강화 풀(`runtime.buffPool`)에서 2개를 무작위로 뽑아 오버레이에 표시합니다.
+`gameLoop`는 매 프레임 `maybeTriggerBuffPick(elapsedMs)`도 확인합니다 — `getBuffPickTriggers(RUN_DURATION_MS)`가 만들어 둔 목록(7,000ms부터 6,500ms 간격, 60초 런에 약 8개) 중 아직 지나지 않은 첫 값에 도달하면 `openBuffPick()`을 호출하고 그 프레임의 나머지 처리(슬롯 만료·스폰·시간 표시)를 건너뜁니다. `openBuffPick`은 `runtime.locked = true`로 게임을 멈추고, 그 시점에 해금된 강화 풀(`runtime.buffPool`, `getUnlockedBuffDefinitions(fragments)`로 계산)에서 2개를 무작위로 뽑아 오버레이에 표시합니다.
 
-강화는 순수 함수형 데이터(`BUFF_DEFINITIONS`, 총 10종)로 정의되며, 각 항목은 `effects` 객체(`comboScale`, `scoreScale`, `wrongLossBonus`, `lifespanScale`, `concurrentBonus`, `deepVerifyWindowBonusMs`, `deepVerifySpawnGenuine`, `lensDurationBonusMs`, `healIntegrity`, `genuineChanceBonus`, `spawnIntervalScale`)의 부분집합만 채웁니다. 이 중 2종은 `unlock.minFragments`로 잠겨 있어 `getUnlockedBuffDefinitions(fragments)`가 걸러낸 목록에서만 등장합니다. `startGame`은 그 시점에 해금된 id를 섞어 `RUN_BUFF_POOL_SIZE`(=6)개만 `runtime.buffPool`로 뽑기 때문에, 같은 참여자라도 런마다 이번 런에 나올 6종 자체가 달라집니다. `chooseBuff(buffId)`는 선택된 강화의 `effects`를 `runtime.buffs`에 누적하고(즉시 발동하는 `healIntegrity`는 그 자리에서 바로 적용), 제시됐던 2장을 모두 풀에서 제거합니다 — 고르지 않은 카드도 다시 나오지 않아, 3번의 픽이 그 런에 뽑힌 6종을 정확히 소진합니다.
+강화는 순수 함수형 데이터(`BUFF_DEFINITIONS`, 총 46종)로 정의되며, 각 항목은 `effects` 객체의 부분집합만 채웁니다. 필드는 두 갈래로 나뉩니다 — **누적형**(런 내내 유지되며 여러 번 뽑을수록 계속 더해지는 `runtime.buffs`의 값: `comboScale`, `scoreScale`, `wrongLossBonus`, `lifespanScale`, `concurrentBonus`, `deepVerifyWindowBonusMs`, `deepVerifySpawnGenuine`, `lensDurationBonusMs`, `genuineChanceBonus`, `spawnIntervalScale`, `milestoneScoreBonus`, `chainClearChance`)와 **즉시 소비형**(뽑는 순간 한 번 적용되고 이후 실제로 소모되는 자원: `lensChargeBonus`, `healIntegrity`, `shieldCharges`, `reviveCharges`, `extraDeepVerifyUse`). 8종은 `unlock.minFragments`로 잠겨 있어 `getUnlockedBuffDefinitions(fragments)`가 걸러낸 목록에서만 등장합니다.
 
-누적된 `runtime.buffs`는 다음 네 지점에서 소비됩니다: `scorePurge(remainingRatio, combo, multiplier, { comboScale, scoreScale })`와 `getWrongClickLoss(deepVerify, wrongLossBonus)`(`activateSlot`), `getSignalLifespanMs(...) * (1 + lifespanScale)`와 `getMaxConcurrentSignals(...) + concurrentBonus`(`spawnRandomSignal`/`gameLoop`), `DEEP_VERIFY_WINDOW_MS + deepVerifyWindowBonusMs`와 `LENS_BOOST_MS + lensDurationBonusMs`(`toggleDeepVerifyWager`/`useArchiveLens`), `pickSignalKind(Math.random, GENUINE_CHANCE + genuineChanceBonus)`와 `getSpawnIntervalMs(...) * (1 + spawnIntervalScale)`(`spawnRandomSignal`/`gameLoop`). 관련 함수 모두 새 매개변수에 하위호환 기본값(빈 객체/0/`GENUINE_CHANCE`)을 둬 기존 호출부와 테스트가 그대로 통과합니다.
+기존 로그라이트와 가장 다른 지점은 **뽑을수록 소진되는 풀이 아니라는 것**입니다. `chooseBuff(buffId)`는 `Object.keys(runtime.buffs)`를 도는 제네릭 루프로 누적형 필드를 전부 더하고(불리언은 OR), 즉시 소비형은 별도 분기에서 해당 자원에 더한 뒤, 어떤 필드도 풀에서 제거하지 않습니다 — 같은 강화가 다음 픽에도 다시 제시될 수 있고, 고를수록 그 효과가 계속 쌓입니다. `runtime.buffCounts`/`buffPickOrder`가 몇 번씩 골랐는지·어떤 순서로 골랐는지를 추적해 상태줄 텍스트("콤보 오버드라이브 ×2")와 코어 주위를 도는 `#buff-orbit` 링(항목마다 점 하나, 2회 이상이면 배지 표시)에 반영합니다.
 
-`closeBuffPick`은 Page Visibility 일시정지에서 쓰던 것과 같은 원리로 재개합니다 — 멈춰 있던 시간(`performance.now() - buffPauseStartedAt`)만큼 `runStartAt`·`nextSpawnAt`·모든 활성 슬롯의 `deadline`을 그대로 밀어 넣어, 강화를 고르는 데 걸린 실제 시간이 60초 런타임에서 소비되지 않게 합니다.
+상한 없는 반복 픽은 극단적인 스택에서 수식이 깨지지 않도록 소비 지점마다 하한을 둡니다 — `scorePurge`는 `comboScale`/`scoreScale`의 유효 배율을 각각 0/0.15 밑으로 내려가지 않게 하고, `spawnRandomSignal`/`gameLoop`의 스폰 간격·신호 지속시간은 각각 90ms/220ms 밑으로, `toggleDeepVerifyWager`의 DEEP VERIFY 창은 1초 밑으로 내려가지 않습니다. 디버프를 아무리 많이 골라도 "매우 나빠짐"에서 멈추고, 수학적으로 뒤집히거나 0으로 나누지는 않습니다.
+
+즉시 소비형 중 셋은 `activateSlot`에서 새 분기로 소비됩니다 — 오클릭 시 `runtime.shieldCharges > 0`이면 무결성 손실·콤보 초기화·`wrongClicks` 증가를 전부 건너뛰고 충전만 소모하고(완전히 없었던 일로 처리), 코어 무결성이 0이 되는 순간 `runtime.reviveCharges > 0`이면 `finishRun()` 대신 무결성을 1로 되돌리고, 가짜 정화가 성공하면 `attemptChainClear`가 `chainClearChance`만큼의 확률로 다른 가짜 하나를 추가로 자동 정화합니다. `extraDeepVerifyUse`는 `runtime.deepVerifyUsesLeft`(기본 1)에 더해져 `toggleDeepVerifyWager`의 사용 가능 여부를 결정합니다.
+
+`closeBuffPick`은 Page Visibility 일시정지에서 쓰던 것과 같은 원리로 재개합니다 — 멈춰 있던 시간(`performance.now() - buffPauseStartedAt`)만큼 `runStartAt`·`nextSpawnAt`·모든 활성 슬롯의 `deadline`을 그대로 밀어 넣어, 강화를 고르는 데 걸린 실제 시간이 60초 런타임에서 소비되지 않게 합니다. 이 원리는 반복 픽으로 바뀐 뒤에도(픽이 3번이 아니라 8번이 되어도) 변경 없이 그대로 재사용됩니다.
 
 정화(`activateSlot`이 `fake` 슬롯에서 호출됨)는 순수 함수 `scorePurge(remainingRatio, combo, multiplier)`로 채점됩니다 — 반응 속도(남은 시간 비율)와 콤보 수에 비례해 점수가 오르고, `DEEP VERIFY` 활성 중이면 `multiplier`가 2가 됩니다. 오클릭(진짜 슬롯 클릭)은 `getWrongClickLoss(deepVerify)`가 기본 1칸, DEEP VERIFY 중이면 2칸의 무결성 손실을 반환합니다 — "위조 승인이 오인보다 무겁다"는 이전 재설계의 비대칭 페널티 원칙을 "오클릭이 놓침보다 무겁다"로 재적용한 것입니다.
 

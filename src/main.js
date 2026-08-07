@@ -3,7 +3,6 @@ import "./styles.css";
 import { AudioEngine } from "./audio.js";
 import {
   BUFF_DEFINITIONS,
-  BUFF_PICK_TRIGGERS_MS,
   DEEP_VERIFY_WINDOW_MS,
   GENUINE_CHANCE,
   LENS_BOOST_MS,
@@ -11,12 +10,12 @@ import {
   MAX_INTEGRITY,
   MAX_MEMORY_FRAGMENTS,
   PLAY_INSTRUCTION,
-  RUN_BUFF_POOL_SIZE,
   RUN_DURATION_MS,
   SLOT_COUNT,
   clamp,
   formatScore,
   getArchiveLensCharges,
+  getBuffPickTriggers,
   getFragmentReward,
   getMaxConcurrentSignals,
   getMoriArchiveRecord,
@@ -100,6 +99,8 @@ const elements = {
   signalField: element("signal-field"),
   signalSlots: [...document.querySelectorAll(".signal-slot")],
   activeBuffs: element("active-buffs"),
+  resourceStrip: element("resource-strip"),
+  buffOrbit: element("buff-orbit"),
   buffPickOverlay: element("buff-pick-overlay"),
   buffCards: [element("buff-card-0"), element("buff-card-1")],
   coreOrb: element("core-orb"),
@@ -161,13 +162,16 @@ const runtime = {
   missedFakes: 0,
 
   deepVerifyUntil: 0,
-  deepVerifyUsed: false,
+  deepVerifyUsesLeft: 1,
   deepVerifyPurges: 0,
 
   lensCharges: 2,
   lensMaxCharges: 2,
   lensUses: 0,
   lensBoostUntil: 0,
+
+  shieldCharges: 0,
+  reviveCharges: 0,
 
   directive: null,
   directiveCompleted: false,
@@ -179,7 +183,8 @@ const runtime = {
   buffChoices: [],
   buffTriggersRemaining: [],
   buffPauseStartedAt: 0,
-  activeBuffNames: [],
+  buffCounts: {},
+  buffPickOrder: [],
 
   locked: false,
   toastTimer: 0,
@@ -265,6 +270,8 @@ function defaultBuffs() {
     lensDurationBonusMs: 0,
     genuineChanceBonus: 0,
     spawnIntervalScale: 0,
+    milestoneScoreBonus: 0,
+    chainClearChance: 0,
   };
 }
 
@@ -648,7 +655,7 @@ function updateLensStatus() {
 function updateDeepVerifyStatus() {
   const now = performance.now();
   const active = now < runtime.deepVerifyUntil;
-  const available = runtime.mode === "play" && !runtime.locked && !runtime.deepVerifyUsed;
+  const available = runtime.mode === "play" && !runtime.locked && runtime.deepVerifyUsesLeft > 0;
 
   elements.deepVerifyButton.disabled = !available && !active;
   elements.deepVerifyButton.dataset.active = String(active);
@@ -656,16 +663,16 @@ function updateDeepVerifyStatus() {
   elements.screenStack.dataset.deepVerify = String(active);
   elements.deepVerifyLabel.textContent = active
     ? `ON · 남은 시간 ${Math.max(0, (runtime.deepVerifyUntil - now) / 1_000).toFixed(1)}초 · 정화 2배 / 오클릭 -2`
-    : runtime.deepVerifyUsed
-      ? "SETTLED · 이번 런에서 모두 사용"
-      : "OFF · 정화 2배 점수 / 오클릭 코어 -2";
+    : runtime.deepVerifyUsesLeft > 0
+      ? `OFF · 정화 2배 점수 / 오클릭 코어 -2 · 남은 사용 ${runtime.deepVerifyUsesLeft}회`
+      : "SETTLED · 이번 런에서 모두 사용";
   elements.deepVerifyButton.setAttribute(
     "aria-label",
     active
       ? "DEEP VERIFY 켜짐. 정화 점수 2배, 오클릭 시 코어 2칸 손실."
       : available
-        ? "DEEP VERIFY 대기. 단축키 D로 5초 동안 정화 2배, 오클릭 2배 손실을 겁니다. 런당 한 번만 사용할 수 있습니다."
-        : "DEEP VERIFY는 이번 런에서 이미 사용했습니다.",
+        ? `DEEP VERIFY 대기. 단축키 D로 5초 동안 정화 2배, 오클릭 2배 손실을 겁니다. 남은 사용 ${runtime.deepVerifyUsesLeft}회.`
+        : "DEEP VERIFY는 이번 런에서 이미 모두 사용했습니다.",
   );
 }
 
@@ -697,6 +704,10 @@ function updateHud() {
   updateLensStatus();
   updateDeepVerifyStatus();
   updateDirectiveReadout();
+  // Shield/revive charges are consumed mid-run (not just at pick time), so
+  // the resource readout has to refresh on every HUD update, not only when
+  // a new item is picked.
+  updateActiveBuffsReadout();
 }
 
 function renderTimeHud(remainingMs) {
@@ -714,9 +725,38 @@ function renderTimeHud(remainingMs) {
 }
 
 function updateActiveBuffsReadout() {
-  elements.activeBuffs.textContent = runtime.activeBuffNames.length
-    ? `강화: ${runtime.activeBuffNames.join(" · ")}`
+  const entries = runtime.buffPickOrder.map((id) => {
+    const definition = BUFF_DEFINITIONS.find((buff) => buff.id === id);
+    return { id, name: definition?.name ?? id, count: runtime.buffCounts[id] ?? 0 };
+  });
+
+  elements.activeBuffs.textContent = entries.length
+    ? `강화: ${entries.map(({ name, count }) => (count > 1 ? `${name} ×${count}` : name)).join(" · ")}`
     : "";
+
+  const resourceParts = [];
+  if (runtime.shieldCharges > 0) resourceParts.push(`보호막 ${runtime.shieldCharges}`);
+  if (runtime.reviveCharges > 0) resourceParts.push(`부활 ${runtime.reviveCharges}`);
+  elements.resourceStrip.hidden = resourceParts.length === 0;
+  elements.resourceStrip.textContent = resourceParts.length ? `보유: ${resourceParts.join(" · ")}` : "";
+
+  const total = entries.length;
+  elements.buffOrbit.replaceChildren(
+    ...entries.map(({ name, count }, index) => {
+      const item = document.createElement("li");
+      item.className = "orbit-item";
+      item.style.setProperty("--angle", `${(360 / total) * index}deg`);
+      item.title = count > 1 ? `${name} ×${count}` : name;
+      item.textContent = name.slice(0, 1);
+      if (count > 1) {
+        const badge = document.createElement("span");
+        badge.className = "orbit-badge";
+        badge.textContent = String(count);
+        item.append(badge);
+      }
+      return item;
+    }),
+  );
 }
 
 function shuffleInPlace(items) {
@@ -762,22 +802,25 @@ function closeBuffPick() {
   runtime.locked = false;
 }
 
+// Ongoing modifiers accumulate through every key already present in
+// defaultBuffs() — adding a new stackable effect only means adding it to
+// that object and to an item's `effects`, nothing here has to change.
+// A few effects are instant, consumable resources instead of ongoing
+// modifiers (lens/shield/revive charges, an integrity heal, an extra DEEP
+// VERIFY use) and are applied directly to their own runtime fields.
 function chooseBuff(buffId) {
   if (!runtime.buffPickActive) return;
   const buff = runtime.buffChoices.find((candidate) => candidate.id === buffId);
   if (!buff) return;
   const effects = buff.effects;
 
-  runtime.buffs.comboScale += effects.comboScale ?? 0;
-  runtime.buffs.scoreScale += effects.scoreScale ?? 0;
-  runtime.buffs.wrongLossBonus += effects.wrongLossBonus ?? 0;
-  runtime.buffs.lifespanScale += effects.lifespanScale ?? 0;
-  runtime.buffs.concurrentBonus += effects.concurrentBonus ?? 0;
-  runtime.buffs.deepVerifyWindowBonusMs += effects.deepVerifyWindowBonusMs ?? 0;
-  runtime.buffs.deepVerifySpawnGenuine = runtime.buffs.deepVerifySpawnGenuine || Boolean(effects.deepVerifySpawnGenuine);
-  runtime.buffs.lensDurationBonusMs += effects.lensDurationBonusMs ?? 0;
-  runtime.buffs.genuineChanceBonus += effects.genuineChanceBonus ?? 0;
-  runtime.buffs.spawnIntervalScale += effects.spawnIntervalScale ?? 0;
+  Object.keys(runtime.buffs).forEach((key) => {
+    if (typeof runtime.buffs[key] === "boolean") {
+      runtime.buffs[key] = runtime.buffs[key] || Boolean(effects[key]);
+    } else {
+      runtime.buffs[key] += effects[key] ?? 0;
+    }
+  });
 
   if (effects.lensChargeBonus) {
     runtime.lensCharges += effects.lensChargeBonus;
@@ -786,15 +829,26 @@ function chooseBuff(buffId) {
   if (effects.healIntegrity) {
     runtime.integrity = Math.min(MAX_INTEGRITY, runtime.integrity + effects.healIntegrity);
   }
+  if (effects.shieldCharges) {
+    runtime.shieldCharges += effects.shieldCharges;
+  }
+  if (effects.reviveCharges) {
+    runtime.reviveCharges += effects.reviveCharges;
+  }
+  if (effects.extraDeepVerifyUse) {
+    runtime.deepVerifyUsesLeft += effects.extraDeepVerifyUse;
+  }
 
-  runtime.buffPool = runtime.buffPool.filter(
-    (id) => !runtime.buffChoices.some((choice) => choice.id === id),
-  );
-  runtime.activeBuffNames.push(buff.name);
+  // No cap and no removal from the pool — the same item can be offered and
+  // picked again later in the same run, and its effects simply add up.
+  runtime.buffCounts[buff.id] = (runtime.buffCounts[buff.id] ?? 0) + 1;
+  if (!runtime.buffPickOrder.includes(buff.id)) runtime.buffPickOrder.push(buff.id);
   updateActiveBuffsReadout();
   closeBuffPick();
   updateHud();
-  showToast(`${buff.name} 적용 — ${buff.description}`);
+  const stackNote = runtime.buffCounts[buff.id] > 1 ? ` (×${runtime.buffCounts[buff.id]})` : "";
+  showToast(`${buff.name}${stackNote} 적용 — ${buff.description}`);
+  pulseMoriState("observing", buff.moriLine || buff.description);
   announce(`${buff.name}을 선택했습니다. ${buff.description}`);
 }
 
@@ -826,22 +880,27 @@ async function startGame(policy = null) {
   runtime.wrongClicks = 0;
   runtime.missedFakes = 0;
   runtime.deepVerifyUntil = 0;
-  runtime.deepVerifyUsed = false;
+  runtime.deepVerifyUsesLeft = 1;
   runtime.deepVerifyPurges = 0;
   runtime.lensMaxCharges = getArchiveLensCharges(runtime.memory.fragments);
   runtime.lensCharges = runtime.lensMaxCharges;
   runtime.lensBoostUntil = 0;
   runtime.lensUses = 0;
+  runtime.shieldCharges = 0;
+  runtime.reviveCharges = 0;
   runtime.directive = getRunDirective(runtime.memory.runs, runtime.memory.fragments);
   runtime.directiveCompleted = false;
   runtime.directiveBonusAwarded = false;
   runtime.buffs = defaultBuffs();
   runtime.buffPickActive = false;
-  const unlockedBuffIds = getUnlockedBuffDefinitions(runtime.memory.fragments).map((buff) => buff.id);
-  runtime.buffPool = shuffleInPlace([...unlockedBuffIds]).slice(0, RUN_BUFF_POOL_SIZE);
+  // The pool is every unlocked item, not a slice — with unlimited stacking
+  // there's no fixed "amount a run needs," so the pick just draws from
+  // everything available and can offer (and stack) the same item again.
+  runtime.buffPool = getUnlockedBuffDefinitions(runtime.memory.fragments).map((buff) => buff.id);
   runtime.buffChoices = [];
-  runtime.buffTriggersRemaining = [...BUFF_PICK_TRIGGERS_MS];
-  runtime.activeBuffNames = [];
+  runtime.buffTriggersRemaining = getBuffPickTriggers(RUN_DURATION_MS);
+  runtime.buffCounts = {};
+  runtime.buffPickOrder = [];
   elements.buffPickOverlay.hidden = true;
   updateActiveBuffsReadout();
   runtime.locked = false;
@@ -899,9 +958,13 @@ function spawnRandomSignal(timestamp, elapsedMs) {
   const slot = idleSlots[Math.floor(Math.random() * idleSlots.length)];
   const kind = pickSignalKind(Math.random, clamp(GENUINE_CHANCE + runtime.buffs.genuineChanceBonus, 0, 1));
   const lensBoost = timestamp < runtime.lensBoostUntil;
-  const lifespan = getSignalLifespanMs(elapsedMs)
-    * (1 + runtime.buffs.lifespanScale)
-    * (lensBoost ? 1.6 : 1);
+  // lifespanScale can stack from an unbounded number of item picks, so the
+  // final duration is floored well above zero — never a signal that's
+  // mathematically alive but visually/practically unclickable.
+  const lifespan = Math.max(
+    220,
+    getSignalLifespanMs(elapsedMs) * Math.max(0.1, 1 + runtime.buffs.lifespanScale),
+  ) * (lensBoost ? 1.6 : 1);
 
   slot.kind = kind;
   slot.state = kind;
@@ -943,11 +1006,38 @@ function shakeSignalField() {
 
 function maybeShowComboCallout(combo) {
   if (!COMBO_MILESTONES.includes(combo)) return;
+  if (runtime.buffs.milestoneScoreBonus > 0) {
+    runtime.score += runtime.buffs.milestoneScoreBonus;
+  }
   elements.comboCallout.textContent = `COMBO ×${combo}!`;
   elements.comboCallout.classList.remove("is-active");
   void elements.comboCallout.offsetWidth;
   elements.comboCallout.classList.add("is-active");
   audio.core();
+}
+
+// chainClearChance can stack from many picks; a successful purge rolls once
+// against it and, on a hit, auto-purges one other live fake for free —
+// the same scoring path as a manual purge, just without a click.
+function attemptChainClear(originSlot, settleDelay) {
+  if (runtime.buffs.chainClearChance <= 0) return;
+  if (Math.random() >= Math.min(1, runtime.buffs.chainClearChance)) return;
+  const otherFakes = runtime.slots.filter((slot) => slot !== originSlot && slot.state === "fake");
+  if (!otherFakes.length) return;
+
+  const target = otherFakes[Math.floor(Math.random() * otherFakes.length)];
+  runtime.combo += 1;
+  runtime.maxCombo = Math.max(runtime.maxCombo, runtime.combo);
+  runtime.purges += 1;
+  const remainingRatio = clamp01((target.deadline - performance.now()) / target.totalMs);
+  const points = scorePurge(remainingRatio, runtime.combo, 1, {
+    comboScale: runtime.buffs.comboScale,
+    scoreScale: runtime.buffs.scoreScale,
+  });
+  runtime.score += points;
+  spawnSignalPop(target.el, `+${points}`, true);
+  settleSlot(target, "hit", settleDelay);
+  maybeShowComboCallout(runtime.combo);
 }
 
 function activateSlot(index) {
@@ -976,6 +1066,17 @@ function activateSlot(index) {
     settleSlot(slot, "hit", settleDelay);
     pulseCoreOrb("hit");
     maybeShowComboCallout(runtime.combo);
+    attemptChainClear(slot, settleDelay);
+  } else if (runtime.shieldCharges > 0) {
+    // A shield fully negates the mistake — no integrity loss, no combo
+    // reset, and it doesn't count toward the wrongClicks stat that feeds
+    // rank/accuracy, since nothing actually got through.
+    runtime.shieldCharges -= 1;
+    spawnSignalPop(slot.el, "SHIELD", true);
+    settleSlot(slot, "hit", settleDelay);
+    pulseCoreOrb("hit");
+    pulseMoriState("answer-correct", `방금 건 내가 대신 막았어. 보호막 ${runtime.shieldCharges}개 남음.`);
+    announce(`오클릭이 보호막으로 막혔습니다. 코어 무결성 손실 없음. 남은 보호막 ${runtime.shieldCharges}개.`);
   } else {
     runtime.combo = 0;
     runtime.wrongClicks += 1;
@@ -992,8 +1093,17 @@ function activateSlot(index) {
 
   updateHud();
   if (runtime.integrity <= 0) {
-    elements.coreOrb.classList.add("is-shattered");
-    finishRun();
+    if (runtime.reviveCharges > 0) {
+      runtime.reviveCharges -= 1;
+      runtime.integrity = 1;
+      pulseCoreOrb("hit");
+      pulseMoriState("answer-correct", `아직 안 끝났어. 코어 1칸으로 버텨. 남은 부활 ${runtime.reviveCharges}회.`);
+      announce(`코어가 부활했습니다. 무결성 1칸으로 복구, 남은 부활 ${runtime.reviveCharges}회.`);
+      updateHud();
+    } else {
+      elements.coreOrb.classList.add("is-shattered");
+      finishRun();
+    }
   }
 }
 
@@ -1025,13 +1135,15 @@ function useArchiveLens() {
 
 function toggleDeepVerifyWager() {
   if (runtime.mode !== "play" || runtime.locked) return;
-  if (runtime.deepVerifyUsed) {
-    showToast("DEEP VERIFY는 이번 런에서 이미 사용했습니다.");
+  if (runtime.deepVerifyUsesLeft <= 0) {
+    showToast("DEEP VERIFY는 이번 런에서 이미 모두 사용했습니다.");
     return;
   }
 
-  runtime.deepVerifyUsed = true;
-  const windowMs = DEEP_VERIFY_WINDOW_MS + runtime.buffs.deepVerifyWindowBonusMs;
+  runtime.deepVerifyUsesLeft -= 1;
+  // deepVerifyWindowBonusMs can stack negative from repeated picks; floor it
+  // so the window can shrink toward "barely worth it" but never vanish.
+  const windowMs = Math.max(1_000, DEEP_VERIFY_WINDOW_MS + runtime.buffs.deepVerifyWindowBonusMs);
   runtime.deepVerifyUntil = performance.now() + windowMs;
   if (runtime.buffs.deepVerifySpawnGenuine) {
     const idleSlots = runtime.slots.filter((slot) => slot.state === "idle");
@@ -1096,8 +1208,11 @@ function gameLoop(timestamp) {
         < maxConcurrent
     ) {
       spawnRandomSignal(timestamp, elapsedMs);
+      // spawnIntervalScale can stack arbitrarily negative across many picks;
+      // floor the interval so spawns can approach "as fast as possible" but
+      // never divide down toward zero/negative.
       runtime.nextSpawnAt = timestamp
-        + getSpawnIntervalMs(elapsedMs) * (1 + runtime.buffs.spawnIntervalScale);
+        + Math.max(90, getSpawnIntervalMs(elapsedMs) * Math.max(0.1, 1 + runtime.buffs.spawnIntervalScale));
     }
 
     if (runtime.deepVerifyUntil > 0) updateDeepVerifyStatus();
