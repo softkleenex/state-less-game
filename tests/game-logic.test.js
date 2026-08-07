@@ -7,6 +7,7 @@ import {
   BUFF_PICK_TRIGGERS_MS,
   GENUINE_CHANCE,
   MAX_MEMORY_FRAGMENTS,
+  RUN_BUFF_POOL_SIZE,
   RUN_DIRECTIVE_BONUS,
   RUN_DURATION_MS,
   SLOT_COUNT,
@@ -25,6 +26,7 @@ import {
   getRunStyleTag,
   getSignalLifespanMs,
   getSpawnIntervalMs,
+  getUnlockedBuffDefinitions,
   getWrongClickLoss,
   pickSignalKind,
   scorePurge,
@@ -74,6 +76,13 @@ test("signal kind sampling matches the configured genuine ratio", () => {
   }
   const ratio = genuine / samples;
   assert.ok(Math.abs(ratio - GENUINE_CHANCE) < 0.05);
+
+  const boosted = createRandom(seedFromString("kind-sample-boosted"));
+  let boostedGenuine = 0;
+  for (let index = 0; index < samples; index += 1) {
+    if (pickSignalKind(boosted, GENUINE_CHANCE + 0.12) === "genuine") boostedGenuine += 1;
+  }
+  assert.ok(Math.abs(boostedGenuine / samples - (GENUINE_CHANCE + 0.12)) < 0.05);
 });
 
 test("purge scoring rewards fast reactions and combo without an unbounded cap, and the wager multiplier doubles it", () => {
@@ -112,13 +121,26 @@ test("buff modifiers scale purge scoring without breaking the unmodified default
 test("the buff pool offers exactly two distinct trade-offs at each of three run milestones", () => {
   assert.equal(BUFF_PICK_TRIGGERS_MS.length, 3);
   assert.equal(BUFF_CHOICES_PER_PICK, 2);
-  assert.equal(BUFF_DEFINITIONS.length, BUFF_PICK_TRIGGERS_MS.length * BUFF_CHOICES_PER_PICK);
+  assert.equal(RUN_BUFF_POOL_SIZE, BUFF_PICK_TRIGGERS_MS.length * BUFF_CHOICES_PER_PICK);
+  assert.ok(BUFF_DEFINITIONS.length >= RUN_BUFF_POOL_SIZE);
   assert.equal(new Set(BUFF_DEFINITIONS.map((buff) => buff.id)).size, BUFF_DEFINITIONS.length);
   for (const buff of BUFF_DEFINITIONS) {
     assert.ok(buff.name.length > 0);
     assert.ok(buff.description.length > 0);
     assert.ok(buff.effects && typeof buff.effects === "object");
   }
+});
+
+test("locked buffs only join the pool once enough memory fragments are recovered", () => {
+  const lockedIds = BUFF_DEFINITIONS.filter((buff) => buff.unlock).map((buff) => buff.id);
+  assert.ok(lockedIds.length > 0);
+
+  const zeroFragmentIds = getUnlockedBuffDefinitions(0).map((buff) => buff.id);
+  lockedIds.forEach((id) => assert.ok(!zeroFragmentIds.includes(id)));
+  assert.ok(zeroFragmentIds.length >= RUN_BUFF_POOL_SIZE);
+
+  const maxFragmentIds = getUnlockedBuffDefinitions(MAX_MEMORY_FRAGMENTS).map((buff) => buff.id);
+  lockedIds.forEach((id) => assert.ok(maxFragmentIds.includes(id)));
 });
 
 test("run directives rotate and complete only at their stated thresholds", () => {

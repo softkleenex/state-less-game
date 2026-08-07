@@ -209,7 +209,7 @@ Papers, Please식 대조로 전환한 뒤에도 참여자가 실제 게임으로
 
 이동+도킹 재설계 직후, 새로 코드를 추가하기 전에 이미 있는 자산과 외부 참고점을 먼저 점검함. 두 방향으로 확인:
 
-1. **런타임 의존성으로 추가할 만한 오픈소스가 있는가**: "여러 지점이 동시에 위험 신호를 보내고 한 명이 뛰어다니며 처리한다"는 이번 구조와 가장 가까운 장르 레퍼런스는 `FTL: Faster Than Light`(다중 선박 시스템 동시 위기 관리)와 `Keep Talking and Nobody Explodes`(여러 모듈이 동시에 경고하는 폭탄 해체)임. 화면 흔들림(screen shake) 라이브러리(`sajmoni/screen-shake` 등, MIT)도 검토했으나, 이 프로젝트는 처음부터 외부 이미지·음원·아이콘 없이 HTML/CSS/Web Audio로 전부 직접 생성한다는 원칙을 지켜 왔고(§5 참고), 흔들림 효과 자체가 CSS 키프레임 10줄 안팎으로 구현 가능해 마감 3일 전 시점에 새 런타임 의존성을 추가하는 리스크가 이득보다 크다고 판단해 채택하지 않음.
+1. **런타임 의존성으로 추가할 만한 오픈소스가 있는가**: "여러 지점이 동시에 위험 신호를 보내고 한 명이 뛰어다니며 처리한다"는 이번 구조와 가장 가까운 장르 레퍼런스는 `FTL: Faster Than Light`(다중 선박 시스템 동시 위기 관리)와 `Keep Talking and Nobody Explodes`(여러 모듈이 동시에 경고하는 폭탄 해체)임. 화면 흔들림(screen shake) 라이브러리(`sajmoni/screen-shake` 등, MIT)도 검토했으나, 흔들림 효과 자체가 CSS 키프레임 10줄 안팎으로 구현 가능해 마감 3일 전 시점에 새 런타임 의존성을 추가하는 리스크가 이득보다 크다고 판단해 채택하지 않음(이 판단은 §5의 외부 에셋 사용 원칙과는 무관하며, 순수하게 이 시점 이 효과에 한정된 비용 대비 이득 판단임 — §5.1의 배경 오디오 루프는 별도로 외부 CC0 음원을 채택함).
 2. **이미 만들어 둔 자산 중 다시 쓸 수 있는데 안 쓰고 있는 게 있는가**: `src/audio.js`를 다시 읽어 `warning()` 메서드가 정의는 되어 있지만 `main.js` 어디에서도 호출되지 않는 죽은 코드임을 발견함(과거 "5초 위기 구간" 설계의 잔재로 추정). 새 사운드를 만들지 않고 이 기존 메서드를 재활용해 위 두 레퍼런스의 "새 경보가 켜졌다"는 신호를 구현.
 
 반영 내용:
@@ -273,6 +273,21 @@ SIGNAL STRIKE로 재설계한 뒤 참여자가 직접 플레이해보고, 게임
 - 모든 신규 애니메이션에 `prefers-reduced-motion` 분기를 추가해, 이 환경에서는 점수가 즉시 최종값으로 표시되고 코어·흔들림·콜아웃 애니메이션이 꺼지되 색상·상태 변화(무결성 색, 랭크 색)는 동일하게 유지됨
 - Puppeteer로 검증: 콤보 4에서 콜아웃이 뜨고 코어가 pulse 상태로 전환되는지, 오클릭 시 코어와 무결성 핍이 함께 amber/rose로 바뀌는지, 무결성이 0이 될 때까지 반복해도 정상적으로 결과 화면에 도달하는지, 결과 화면 점수가 시간에 따라 실제로 증가하다 최종값에 도달하는지, `NULL`/`S` 랭크에 따라 `resultGlyph`의 `data-rank`가 정확히 반영되는지 확인 — 콘솔 에러 0건
 
+### 강화 풀 다양화 + 잠금 해제형 메타 진행
+
+> 더 밀어붙히자. 각각의 대상들은,, 네가 웹 검색을 통해서 보충할 수 있나?
+
+손맛 보강 이후에도 남은 세 가지 얇은 지점(오디오·강화 다양성·런 간 반복 동기)을 직접 짚어 알렸고, 참여자가 "더 밀어붙히자"며 웹 검색으로 실제 레퍼런스를 찾아 보강할 수 있는지 물음. 웹 검색으로 로그라이트 설계 아티클을 확인한 결과 "variety within consistency" — 핵심 루프는 고정하고 빌드·조합은 매번 달라야 한다는 원칙과, "achievement가 죽음을 덜 아프게 만든다"는 메타 진행 관찰을 근거로 다음을 반영함:
+
+- 강화를 6종에서 10종으로 확장(`역풍`, `냉정 유지`, `신호 왜곡`, `속사 모드` 추가). 기존에는 매 런마다 같은 6종을 순서만 바꿔 제시했는데, 이제 `RUN_BUFF_POOL_SIZE`(=6)만큼을 10종 중에서 무작위로 뽑아 이번 런의 메뉴 자체가 매번 달라지도록 바꿈
+- `신호 왜곡`·`속사 모드` 2종은 `unlock.minFragments: 2`로 기억 조각 2개 이상을 모아야 강화 풀에 들어옴 — 처음 몇 판은 안전한 기본 강화만 보이고, 반복 플레이로 기억 조각을 모을수록 더 높은 변동성의 강화가 열림. 인트로 화면에 "기억 조각을 N개 더 모으면 고위험 강화 2종이 열립니다" 안내를 추가해 눈에 보이는 다음 목표로 삼음
+- `pickSignalKind`에 `genuineChance` 매개변수를 추가(기본값은 기존 `GENUINE_CHANCE` 그대로 유지하는 하위호환 확장)하고, 신규 필드 `genuineChanceBonus`/`spawnIntervalScale`을 `runtime.buffs`에 연동해 `신호 왜곡`(진짜 비율 상승)과 `속사 모드`(등장 간격 단축)를 구현
+- `tests/game-logic.test.js`에 강화 풀이 `RUN_BUFF_POOL_SIZE` 이상을 갖는지, 잠긴 강화가 기억 조각 0개에는 절대 섞이지 않고 최대치에는 반드시 포함되는지 검증하는 테스트를 추가(총 17개 통과)
+
+### 배경 오디오: 합성 전용에서 CC0 외부 음원 허용으로
+
+같은 요청에 이어 참여자가 Freesound API 자격증명을 전달하며 실제 외부 음원 사용을 지시함(§5.1에 기술 세부 사항 기록). 이전까지 이 문서와 README는 "외부 음원을 사용하지 않는다"를 원칙처럼 서술했는데, 참여자가 "다른 가능성을 닫는 문서 내용을 전부 없애라"고 명시적으로 요청해 그 서술을 모두 "필요하면 출처·라이선스를 표에 남기고 추가할 수 있다"는 열린 서술로 고쳤음(§5, README 참고). 기존 합성 SFX(정화·오클릭·경보·콤보·결과)는 그대로 두고, 배경 앰비언트 루프 1개만 CC0 외부 음원으로 교체해 오디오에 실제 질감을 더함.
+
 ## 3. AI가 지원한 구현 영역
 
 ### 기획
@@ -332,7 +347,7 @@ SIGNAL STRIKE로 재설계한 뒤 참여자가 직접 플레이해보고, 게임
 - (터미널 이동+도킹 재설계 이후, SIGNAL STRIKE 이전 상태) Puppeteer로 로컬 Chrome을 직접 조작해: 클릭 이동이 목표 터미널에 정확히 도킹하고 세션 카드가 열리는지, 판정 후 대기열의 다음 세션이 같은 슬롯에 즉시 이어지는지, 무결성이 0이 되면 결과 화면에 `NULL` 랭크로 도달하는지, 터미널에 도킹하지 않고 카운트다운만 흘려보내면 무결성 손실 없이 "놓침"만 기록되는지, 방향키 입력만으로 아바타 좌표가 실제로 변화하는지 확인 — 다섯 시나리오 모두 콘솔 에러 0건
 - (SIGNAL STRIKE) Puppeteer로 재검증: 가짜 신호 클릭 시 정화·점수·콤보 상승, 진짜 신호 클릭 시 코어 무결성 하락과 콤보 초기화, 오클릭 3회로 무결성이 0이 되면 결과 화면에 `NULL` 랭크로 도달, `F`/`D` 키로 `ARCHIVE LENS`·`DEEP VERIFY`가 실제로 활성화되고 DEEP VERIFY 중 정화 점수가 정확히 2배로 채점되는지, 번호 키 1~6이 클릭과 동일하게 슬롯을 정화하는지 확인 — 콘솔 에러 0건
 - `scorePurge(1, 8, 1, {})`가 수정 전과 동일한 값을 내는지(하위호환), `comboScale`/`scoreScale`을 각각 올리고 내렸을 때 점수가 예상대로 오르내리는지, `getWrongClickLoss`에 `bonusLoss`를 더하거나 빼도 0 미만으로는 내려가지 않는지 테스트
-- `BUFF_DEFINITIONS`가 정확히 6개(3번 픽 × 2장)이고 id가 전부 고유하며 각 항목에 이름·설명·effects가 채워져 있는지 테스트
+- `BUFF_DEFINITIONS`가 한 런에 필요한 개수(`RUN_BUFF_POOL_SIZE`=3번 픽 × 2장=6) 이상이고 id가 전부 고유하며 각 항목에 이름·설명·effects가 채워져 있는지, 잠긴 강화가 기억 조각 0개에는 섞이지 않고 최대치에는 반드시 포함되는지 테스트
 - Puppeteer로 실제 브라우저 조작: 강화 픽이 정확히 15,000ms/30,000ms/45,000ms 경과 시점에 열리는지, 3번의 픽에서 제시되는 카드 쌍이 겹치지 않고 6종을 정확히 소진하는지, 번호 키(1/2)로 고르면 오버레이가 닫히고 상태줄에 강화 이름이 누적되는지, 두 번의 정지-재개 이후에도 60초 런이 정확한 시점에 끝나 결과 화면에 도달하는지 확인 — 콘솔 에러 0건
 
 ## 4. 핵심 기술 구조
@@ -349,9 +364,9 @@ SIGNAL STRIKE로 재설계한 뒤 참여자가 직접 플레이해보고, 게임
 
 `gameLoop`는 매 프레임 `maybeTriggerBuffPick(elapsedMs)`도 확인합니다 — `BUFF_PICK_TRIGGERS_MS`(15,000/30,000/45,000ms) 중 아직 지나지 않은 첫 값에 도달하면 `openBuffPick()`을 호출하고 그 프레임의 나머지 처리(슬롯 만료·스폰·시간 표시)를 건너뜁니다. `openBuffPick`은 `runtime.locked = true`로 게임을 멈추고, 아직 제시되지 않은 강화 풀(`runtime.buffPool`)에서 2개를 무작위로 뽑아 오버레이에 표시합니다.
 
-강화는 순수 함수형 데이터(`BUFF_DEFINITIONS`)로 정의되며, 각 항목은 `effects` 객체(`comboScale`, `scoreScale`, `wrongLossBonus`, `lifespanScale`, `concurrentBonus`, `deepVerifyWindowBonusMs`, `deepVerifySpawnGenuine`, `lensDurationBonusMs`, `healIntegrity`)의 부분집합만 채웁니다. `chooseBuff(buffId)`는 선택된 강화의 `effects`를 `runtime.buffs`에 누적하고(즉시 발동하는 `healIntegrity`는 그 자리에서 바로 적용), 제시됐던 2장을 모두 풀에서 제거합니다 — 고르지 않은 카드도 다시 나오지 않아, 3번의 픽이 항상 6종을 정확히 소진합니다.
+강화는 순수 함수형 데이터(`BUFF_DEFINITIONS`, 총 10종)로 정의되며, 각 항목은 `effects` 객체(`comboScale`, `scoreScale`, `wrongLossBonus`, `lifespanScale`, `concurrentBonus`, `deepVerifyWindowBonusMs`, `deepVerifySpawnGenuine`, `lensDurationBonusMs`, `healIntegrity`, `genuineChanceBonus`, `spawnIntervalScale`)의 부분집합만 채웁니다. 이 중 2종은 `unlock.minFragments`로 잠겨 있어 `getUnlockedBuffDefinitions(fragments)`가 걸러낸 목록에서만 등장합니다. `startGame`은 그 시점에 해금된 id를 섞어 `RUN_BUFF_POOL_SIZE`(=6)개만 `runtime.buffPool`로 뽑기 때문에, 같은 참여자라도 런마다 이번 런에 나올 6종 자체가 달라집니다. `chooseBuff(buffId)`는 선택된 강화의 `effects`를 `runtime.buffs`에 누적하고(즉시 발동하는 `healIntegrity`는 그 자리에서 바로 적용), 제시됐던 2장을 모두 풀에서 제거합니다 — 고르지 않은 카드도 다시 나오지 않아, 3번의 픽이 그 런에 뽑힌 6종을 정확히 소진합니다.
 
-누적된 `runtime.buffs`는 다음 세 지점에서 소비됩니다: `scorePurge(remainingRatio, combo, multiplier, { comboScale, scoreScale })`와 `getWrongClickLoss(deepVerify, wrongLossBonus)`(`activateSlot`), `getSignalLifespanMs(...) * (1 + lifespanScale)`와 `getMaxConcurrentSignals(...) + concurrentBonus`(`spawnRandomSignal`/`gameLoop`), `DEEP_VERIFY_WINDOW_MS + deepVerifyWindowBonusMs`와 `LENS_BOOST_MS + lensDurationBonusMs`(`toggleDeepVerifyWager`/`useArchiveLens`). 두 함수 모두 새 매개변수에 하위호환 기본값(빈 객체/0)을 둬 기존 호출부와 테스트가 그대로 통과합니다.
+누적된 `runtime.buffs`는 다음 네 지점에서 소비됩니다: `scorePurge(remainingRatio, combo, multiplier, { comboScale, scoreScale })`와 `getWrongClickLoss(deepVerify, wrongLossBonus)`(`activateSlot`), `getSignalLifespanMs(...) * (1 + lifespanScale)`와 `getMaxConcurrentSignals(...) + concurrentBonus`(`spawnRandomSignal`/`gameLoop`), `DEEP_VERIFY_WINDOW_MS + deepVerifyWindowBonusMs`와 `LENS_BOOST_MS + lensDurationBonusMs`(`toggleDeepVerifyWager`/`useArchiveLens`), `pickSignalKind(Math.random, GENUINE_CHANCE + genuineChanceBonus)`와 `getSpawnIntervalMs(...) * (1 + spawnIntervalScale)`(`spawnRandomSignal`/`gameLoop`). 관련 함수 모두 새 매개변수에 하위호환 기본값(빈 객체/0/`GENUINE_CHANCE`)을 둬 기존 호출부와 테스트가 그대로 통과합니다.
 
 `closeBuffPick`은 Page Visibility 일시정지에서 쓰던 것과 같은 원리로 재개합니다 — 멈춰 있던 시간(`performance.now() - buffPauseStartedAt`)만큼 `runStartAt`·`nextSpawnAt`·모든 활성 슬롯의 `deadline`을 그대로 밀어 넣어, 강화를 고르는 데 걸린 실제 시간이 60초 런타임에서 소비되지 않게 합니다.
 
@@ -403,8 +418,17 @@ SIGNAL STRIKE로 재설계한 뒤 참여자가 직접 플레이해보고, 게임
 | puppeteer-core | 재설계 검증용 헤드리스/로컬 Chrome 조작 | package.json 명시 버전 | Apache-2.0, <https://github.com/puppeteer/puppeteer> |
 | Pandoc | 제출용 PDF 생성 시 마크다운→HTML 변환(게임 실행에는 사용하지 않음) | 3.9.0 | GPL-2.0-or-later, <https://pandoc.org/> |
 | JetBrains Mono | 일지·터미널 텍스트용 모노스페이스 폰트, `public/fonts/`에 자체 호스팅 | v24 (가변 폰트) | SIL Open Font License 1.1, <https://github.com/JetBrains/JetBrainsMono> |
+| "Industrial Machine Drone (Seamless Loop)" | 플레이 화면 배경 앰비언트 루프(`src/assets/audio/core-drone-loop.mp3`) | Freesound #854269 | CC0 1.0(퍼블릭 도메인), 제작자 kkenny101, <https://freesound.org/s/854269/> |
 
-MORI 전신 기준표와 17개 상황별 흉상 이미지는 참여자가 기록된 프롬프트를 사용해 ChatGPT Image에서 생성·선택했습니다. 폰트 1종(JetBrains Mono, 위 표 참고)을 제외하면 그 외 외부 이미지, 아이콘, 음원, 영상 파일은 사용하지 않았습니다. UI 그래픽은 HTML/CSS로, 효과음은 Web Audio API로 실시간 생성합니다.
+MORI 전신 기준표와 17개 상황별 흉상 이미지는 참여자가 기록된 프롬프트를 사용해 ChatGPT Image에서 생성·선택했습니다. UI 그래픽은 HTML/CSS로 직접 만들고, 효과음(정화·오클릭·경보·콤보·결과)은 Web Audio API 오실레이터로 그 자리에서 합성합니다. 배경 앰비언트 루프 1개는 위 표의 Freesound CC0 음원을 그대로 가져와 씁니다 — 이 프로젝트는 "합성 오디오만 사용한다"는 원칙을 처음부터 못박아 두지 않았고, 라이선스가 명확하고 출처를 표에 남길 수 있는 외부 에셋이라면 필요에 따라 계속 추가할 수 있습니다.
+
+### 5.1 배경 앰비언트 루프 추가(Freesound API)
+
+> "웹 검색을 통해서 보충할수있나?"(오디오·강화 다양성·메타 진행 보강 방법을 물음) 다음, 참여자가 Freesound 계정에서 발급한 API 자격증명을 전달하며 "시스템의 루트에 해당 api key 저장하고(이 폴더에는 사용여부만 기재), 작업하자, 또한 그외에 외부 에셋 추가 가능성은 열어놓자, 다른 가능성을 닫는 문서내용 전부 없애고, 작업해"라고 지시했습니다. (자격증명 원문은 보안상 이 문서에 인용하지 않습니다.)
+
+Freesound API는 **Token 인증만으로 검색과 미리듣기(preview) 파일 다운로드가 가능**하고, 원본 파일 다운로드에만 OAuth2 로그인이 필요합니다. 게임에 쓰는 짧은 루프는 미리듣기 품질(HQ MP3, 128kbps)로도 충분해 OAuth2 없이 Token 인증만으로 전체 과정을 완료했습니다. 자격증명은 저장소에 절대 포함하지 않고, 참여자의 zsh 환경 변수(`~/.zshrc`의 `FREESOUND_API_KEY`/`FREESOUND_CLIENT_ID`)에만 저장해 로컬 조회에 사용했고, 이 문서와 저장소에는 "Freesound API 사용함"이라는 사용 여부만 남깁니다.
+
+검색 기준은 CC0 라이선스 필터, `seamless loop`(완전 루프) 태그, 게임 테마(신호·코어·SF 앰비언트)와의 어울림이었습니다. 최종 선택한 "Industrial Machine Drone (Seamless Loop)"(Freesound #854269, kkenny101, CC0)은 7.7초 완전 루프라 60초 런 내내 이어 붙여도 이어지는 지점이 들리지 않습니다. `src/audio.js`의 `AudioEngine`에 `startDrone`/`setDroneTension`/`stopDrone`을 추가해 `AudioBufferSourceNode`로 반복 재생하고, 로우패스 필터 컷오프를 코어 무결성에, 게인을 남은 시간 비율에 연동했습니다 — 코어가 손상될수록 소리가 먹먹해지는 것은 코어 오브가 시각적으로 흐려지는 것과 같은 상태를 청각으로 반복하는 장치입니다. 기존 효과음(정화·오클릭 등)은 전부 그대로 합성 방식을 유지하고, 이 배경 루프만 외부 음원으로 대체했습니다.
 
 ## 6. 검증 명령
 

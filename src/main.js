@@ -5,10 +5,12 @@ import {
   BUFF_DEFINITIONS,
   BUFF_PICK_TRIGGERS_MS,
   DEEP_VERIFY_WINDOW_MS,
+  GENUINE_CHANCE,
   LENS_BOOST_MS,
   LENS_EXTEND_BONUS_MS,
   MAX_INTEGRITY,
   MAX_MEMORY_FRAGMENTS,
+  RUN_BUFF_POOL_SIZE,
   RUN_DURATION_MS,
   SLOT_COUNT,
   clamp,
@@ -24,6 +26,7 @@ import {
   getRunStyleTag,
   getSignalLifespanMs,
   getSpawnIntervalMs,
+  getUnlockedBuffDefinitions,
   getWrongClickLoss,
   pickSignalKind,
   scorePurge,
@@ -259,6 +262,8 @@ function defaultBuffs() {
     deepVerifyWindowBonusMs: 0,
     deepVerifySpawnGenuine: false,
     lensDurationBonusMs: 0,
+    genuineChanceBonus: 0,
+    spawnIntervalScale: 0,
   };
 }
 
@@ -396,15 +401,20 @@ function renderIntro(messageOverride = "") {
     : "코어 방어 다시 시작";
   elements.missionBrief.dataset.state = archiveComplete ? "complete" : "next";
   elements.missionBriefLabel.textContent = archiveComplete ? "ARCHIVE COMPLETE" : "NEXT FILE";
+  const buffUnlockHint = fragments < 2
+    ? ` 기억 조각을 ${2 - fragments}개 더 모으면 고위험 강화 2종(신호 왜곡·속사 모드)이 강화 픽에 추가됩니다.`
+    : "";
   elements.missionBriefCopy.textContent = archiveComplete
     ? "여섯 MORI 파일을 모두 복구했습니다. 최고 점수 "
       + formatScore(runtime.memory.bestScore)
       + "에 도전하세요."
+      + buffUnlockHint
     : "60초 런에서 A랭크 이상으로 코어를 지켜내면 "
       + nextRecord.code
       + " ‘"
       + nextRecord.title
-      + "’이 열립니다.";
+      + "’이 열립니다."
+      + buffUnlockHint;
   const directive = getRunDirective(runtime.memory.runs, fragments);
   elements.introDirective.dataset.directive = directive.id;
   elements.introDirectiveCopy.textContent = `${directive.code} · ${directive.label}`;
@@ -722,6 +732,8 @@ function chooseBuff(buffId) {
   runtime.buffs.deepVerifyWindowBonusMs += effects.deepVerifyWindowBonusMs ?? 0;
   runtime.buffs.deepVerifySpawnGenuine = runtime.buffs.deepVerifySpawnGenuine || Boolean(effects.deepVerifySpawnGenuine);
   runtime.buffs.lensDurationBonusMs += effects.lensDurationBonusMs ?? 0;
+  runtime.buffs.genuineChanceBonus += effects.genuineChanceBonus ?? 0;
+  runtime.buffs.spawnIntervalScale += effects.spawnIntervalScale ?? 0;
 
   if (effects.lensChargeBonus) {
     runtime.lensCharges += effects.lensChargeBonus;
@@ -781,7 +793,8 @@ async function startGame(policy = null) {
   runtime.directiveBonusAwarded = false;
   runtime.buffs = defaultBuffs();
   runtime.buffPickActive = false;
-  runtime.buffPool = BUFF_DEFINITIONS.map((buff) => buff.id);
+  const unlockedBuffIds = getUnlockedBuffDefinitions(runtime.memory.fragments).map((buff) => buff.id);
+  runtime.buffPool = shuffleInPlace([...unlockedBuffIds]).slice(0, RUN_BUFF_POOL_SIZE);
   runtime.buffChoices = [];
   runtime.buffTriggersRemaining = [...BUFF_PICK_TRIGGERS_MS];
   runtime.activeBuffNames = [];
@@ -812,6 +825,7 @@ async function startGame(policy = null) {
   await transitionTo("play");
   revealScreenOnStackedLayout(elements.playScreen);
   audio.start();
+  audio.startDrone();
 
   const now = performance.now();
   runtime.runStartAt = now;
@@ -837,7 +851,7 @@ function spawnRandomSignal(timestamp, elapsedMs) {
   const idleSlots = runtime.slots.filter((slot) => slot.state === "idle");
   if (!idleSlots.length) return;
   const slot = idleSlots[Math.floor(Math.random() * idleSlots.length)];
-  const kind = pickSignalKind();
+  const kind = pickSignalKind(Math.random, clamp(GENUINE_CHANCE + runtime.buffs.genuineChanceBonus, 0, 1));
   const lensBoost = timestamp < runtime.lensBoostUntil;
   const lifespan = getSignalLifespanMs(elapsedMs)
     * (1 + runtime.buffs.lifespanScale)
@@ -1036,12 +1050,14 @@ function gameLoop(timestamp) {
         < maxConcurrent
     ) {
       spawnRandomSignal(timestamp, elapsedMs);
-      runtime.nextSpawnAt = timestamp + getSpawnIntervalMs(elapsedMs);
+      runtime.nextSpawnAt = timestamp
+        + getSpawnIntervalMs(elapsedMs) * (1 + runtime.buffs.spawnIntervalScale);
     }
 
     if (runtime.deepVerifyUntil > 0) updateDeepVerifyStatus();
     if (runtime.lensBoostUntil > 0) updateLensStatus();
     renderTimeHud(remainingMs);
+    audio.setDroneTension(runtime.integrity / MAX_INTEGRITY, 1 - clamp01(remainingMs / RUN_DURATION_MS));
 
     if (elapsedMs >= RUN_DURATION_MS) {
       finishRun();
@@ -1096,6 +1112,7 @@ function animateScoreCountUp(target, durationMs = 900) {
 
 async function finishRun() {
   cancelRunTimers();
+  audio.stopDrone();
   runtime.locked = true;
   runtime.mode = "result";
 

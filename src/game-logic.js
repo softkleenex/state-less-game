@@ -12,12 +12,16 @@ export const LENS_BOOST_MS = 4_000;
 export const LENS_EXTEND_BONUS_MS = 700;
 export const BUFF_PICK_TRIGGERS_MS = [15_000, 30_000, 45_000];
 export const BUFF_CHOICES_PER_PICK = 2;
+export const RUN_BUFF_POOL_SIZE = BUFF_PICK_TRIGGERS_MS.length * BUFF_CHOICES_PER_PICK;
 
-// Each pick offers two of these and removes both from the pool, so a single
-// 60s run surfaces exactly three distinct trade-offs (6 buffs / 2 per pick).
-// None of these are pure power-ups — every one gives something and takes
-// something, so the choice itself is the point, not just "pick the biggest
-// number."
+// The pool is bigger than one run needs (RUN_BUFF_POOL_SIZE buffs get drawn
+// out of everything unlocked): a run only ever sees a random subset, so the
+// three pairs offered are a different mix each time instead of the same six
+// trade-offs in a different order. `unlock.minFragments` gates the two
+// higher-variance buffs behind having recovered a couple of memory fragments
+// already, so a first-time run only ever sees the safer basics. None of
+// these are pure power-ups — every one gives something and takes something,
+// so the choice itself is the point, not just "pick the biggest number."
 export const BUFF_DEFINITIONS = [
   {
     id: "combo-focus",
@@ -55,7 +59,40 @@ export const BUFF_DEFINITIONS = [
     description: "코어 무결성 즉시 1칸 회복, 콤보 보너스 -20%",
     effects: { healIntegrity: 1, comboScale: -0.2 },
   },
+  {
+    id: "backdraft",
+    name: "역풍",
+    description: "정화 점수 +25%, 동시 등장 최대 개수 -1",
+    effects: { scoreScale: 0.25, concurrentBonus: -1 },
+  },
+  {
+    id: "cold-focus",
+    name: "냉정 유지",
+    description: "콤보 보너스 -30%, DEEP VERIFY 지속시간 +2초",
+    effects: { comboScale: -0.3, deepVerifyWindowBonusMs: 2_000 },
+  },
+  {
+    id: "signal-warp",
+    name: "신호 왜곡",
+    description: "진짜 신호 비율 +12%p, 정화 점수 +15%",
+    effects: { genuineChanceBonus: 0.12, scoreScale: 0.15 },
+    unlock: { minFragments: 2 },
+  },
+  {
+    id: "rapid-fire",
+    name: "속사 모드",
+    description: "신호 등장 간격 -18%, 신호 지속시간 -15%",
+    effects: { spawnIntervalScale: -0.18, lifespanScale: -0.15 },
+    unlock: { minFragments: 2 },
+  },
 ];
+
+export function getUnlockedBuffDefinitions(fragments = 0) {
+  const safeFragments = clamp(Math.floor(Number(fragments) || 0), 0, MAX_MEMORY_FRAGMENTS);
+  return BUFF_DEFINITIONS.filter(
+    (buff) => !buff.unlock || safeFragments >= buff.unlock.minFragments,
+  );
+}
 
 const SPAWN_INTERVAL_RANGE_MS = [900, 340];
 const SIGNAL_LIFESPAN_RANGE_MS = [1_450, 700];
@@ -187,8 +224,8 @@ export function getMaxConcurrentSignals(elapsedMs, durationMs = RUN_DURATION_MS)
   );
 }
 
-export function pickSignalKind(random = Math.random) {
-  return random() < GENUINE_CHANCE ? "genuine" : "fake";
+export function pickSignalKind(random = Math.random, genuineChance = GENUINE_CHANCE) {
+  return random() < genuineChance ? "genuine" : "fake";
 }
 
 // Speed rewards reacting close to spawn, combo rewards an unbroken run of
