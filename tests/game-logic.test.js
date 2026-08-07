@@ -2,35 +2,29 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  DEEP_VERIFY_BONUS,
-  DEEP_VERIFY_INTEGRITY_LOSS,
-  FINAL_CORE_DEEP_VERIFY_BONUS,
+  GENUINE_CHANCE,
   MAX_MEMORY_FRAGMENTS,
   RUN_DIRECTIVE_BONUS,
-  SYNC_RECOVERY_STREAK,
-  TOTAL_ROUNDS,
-  WAVE_CORRUPTED_CHANCE,
-  WAVE_FACTS_PER_CLAIM,
-  WAVE_SESSION_TARGET,
-  WAVE_SESSION_TIMER_MS,
+  RUN_DURATION_MS,
+  SLOT_COUNT,
+  WRONG_CLICK_LOSS,
+  WRONG_CLICK_LOSS_DEEP_VERIFY,
   awardMemoryFragment,
-  createFactCatalog,
   createRandom,
-  createSessionClaims,
   getArchiveLensCharges,
-  getAuditGateStatus,
-  getDeepVerifyBonus,
   getFragmentReward,
+  getMaxConcurrentSignals,
   getMoriArchiveRecord,
   getResult,
   getRunDirective,
   getRunDirectiveStatus,
   getRunStyleRemark,
   getRunStyleTag,
-  getSyncRecoveryIndex,
-  getWaveConfig,
-  getWrongJudgmentLoss,
-  scoreCorrectAnswer,
+  getSignalLifespanMs,
+  getSpawnIntervalMs,
+  getWrongClickLoss,
+  pickSignalKind,
+  scorePurge,
   seedFromString,
 } from "../src/game-logic.js";
 import {
@@ -39,25 +33,6 @@ import {
   readCookieValue,
   sanitizeMemory,
 } from "../src/state-store.js";
-
-const snapshot = {
-  visitCount: 2,
-  lastEnding: "verified",
-  theme: "dark",
-  timePhase: "night",
-  inputMode: "keyboard",
-  tabLeft: false,
-  peerPresent: false,
-  viewport: "wide",
-  motion: "full",
-  network: "online",
-  localHour: 23,
-  viewportWidth: 1440,
-  fragments: 4,
-  runs: 3,
-  bestScore: 5_880,
-  policy: "persistent",
-};
 
 test("seeded random sequence is deterministic", () => {
   const seed = seedFromString("same-session");
@@ -69,257 +44,98 @@ test("seeded random sequence is deterministic", () => {
   );
 });
 
-test("fact catalog exposes indirect evidence and three distinct interpretations", () => {
-  const catalog = createFactCatalog(snapshot);
-  assert.equal(catalog.length, 14);
-  for (const fact of catalog) {
-    assert.ok(fact.id);
-    assert.ok(fact.label);
-    assert.ok(fact.value);
-    assert.equal(fact.valueOptions[0], fact.value);
-    assert.equal(new Set(fact.valueOptions).size, 3);
-    assert.ok(fact.evidenceText);
-    assert.notEqual(fact.truthText, fact.lieText);
-    assert.notEqual(fact.truthText, fact.decoyText);
-    assert.notEqual(fact.lieText, fact.decoyText);
+test("spawn interval and signal lifespan shrink while concurrency grows across the run", () => {
+  const early = { interval: getSpawnIntervalMs(0), lifespan: getSignalLifespanMs(0), concurrent: getMaxConcurrentSignals(0) };
+  const mid = { interval: getSpawnIntervalMs(RUN_DURATION_MS / 2), lifespan: getSignalLifespanMs(RUN_DURATION_MS / 2), concurrent: getMaxConcurrentSignals(RUN_DURATION_MS / 2) };
+  const late = { interval: getSpawnIntervalMs(RUN_DURATION_MS), lifespan: getSignalLifespanMs(RUN_DURATION_MS), concurrent: getMaxConcurrentSignals(RUN_DURATION_MS) };
+
+  assert.ok(early.interval > mid.interval);
+  assert.ok(mid.interval > late.interval);
+  assert.ok(early.lifespan > mid.lifespan);
+  assert.ok(mid.lifespan > late.lifespan);
+  assert.ok(early.concurrent <= mid.concurrent);
+  assert.ok(mid.concurrent <= late.concurrent);
+  assert.ok(late.concurrent <= SLOT_COUNT);
+
+  // Values past the run duration clamp instead of continuing to escalate.
+  assert.equal(getSpawnIntervalMs(RUN_DURATION_MS * 2), late.interval);
+  assert.equal(getMaxConcurrentSignals(-100), early.concurrent);
+});
+
+test("signal kind sampling matches the configured genuine ratio", () => {
+  const random = createRandom(seedFromString("kind-sample"));
+  let genuine = 0;
+  const samples = 4_000;
+  for (let index = 0; index < samples; index += 1) {
+    if (pickSignalKind(random) === "genuine") genuine += 1;
   }
-
-  const factsById = Object.fromEntries(catalog.map((fact) => [fact.id, fact]));
-  assert.equal(factsById.shards.value, "04 / 06");
-  assert.equal(factsById.runs.value, "03 COMPLETE");
-  assert.equal(factsById.retention.value, "7 DAYS");
-  assert.equal(factsById.best.value, "05880");
-  assert.match(factsById.shards.evidenceText, /^COOKIE SHARDS/);
-  assert.match(factsById.retention.evidenceText, /^COOKIE RETENTION/);
+  const ratio = genuine / samples;
+  assert.ok(Math.abs(ratio - GENUINE_CHANCE) < 0.05);
 });
 
-test("cookie progression facts keep distinct options at their storage caps", () => {
-  const catalog = createFactCatalog({
-    ...snapshot,
-    fragments: 6,
-    runs: 999,
-    bestScore: 999_999,
-    policy: "session",
-  });
-  const factsById = Object.fromEntries(catalog.map((fact) => [fact.id, fact]));
-
-  assert.equal(factsById.shards.value, "06 / 06");
-  assert.equal(factsById.runs.value, "999 COMPLETE");
-  assert.equal(factsById.best.value, "999999");
-  assert.equal(factsById.retention.value, "TAB ONLY");
-  for (const id of ["shards", "runs", "best", "retention"]) {
-    assert.equal(new Set(factsById[id].valueOptions).size, 3);
-  }
+test("purge scoring rewards fast reactions and combo without an unbounded cap, and the wager multiplier doubles it", () => {
+  const slow = scorePurge(0, 0);
+  const fast = scorePurge(1, 0);
+  const highCombo = scorePurge(0, 12);
+  const overCombo = scorePurge(0, 999);
+  assert.ok(fast > slow);
+  assert.ok(highCombo > slow);
+  assert.equal(highCombo, overCombo);
+  assert.equal(scorePurge(1, 12, 2), scorePurge(1, 12) * 2);
 });
 
-test("wave config arrays are sized for all six waves and escalate monotonically", () => {
-  for (const array of [WAVE_SESSION_TARGET, WAVE_FACTS_PER_CLAIM, WAVE_SESSION_TIMER_MS, WAVE_CORRUPTED_CHANCE]) {
-    assert.equal(array.length, TOTAL_ROUNDS);
-  }
-  for (let index = 1; index < TOTAL_ROUNDS; index += 1) {
-    assert.ok(WAVE_SESSION_TARGET[index] >= WAVE_SESSION_TARGET[index - 1]);
-    assert.ok(WAVE_FACTS_PER_CLAIM[index] >= WAVE_FACTS_PER_CLAIM[index - 1]);
-    assert.ok(WAVE_SESSION_TIMER_MS[index] <= WAVE_SESSION_TIMER_MS[index - 1]);
-    assert.ok(WAVE_CORRUPTED_CHANCE[index] >= WAVE_CORRUPTED_CHANCE[index - 1]);
-  }
-
-  const config = getWaveConfig(2);
-  assert.equal(config.target, WAVE_SESSION_TARGET[2]);
-  assert.equal(config.factsPerClaim, WAVE_FACTS_PER_CLAIM[2]);
-  assert.equal(config.timerMs, WAVE_SESSION_TIMER_MS[2]);
-  assert.equal(config.corruptedChance, WAVE_CORRUPTED_CHANCE[2]);
-
-  assert.equal(getWaveConfig(-1).target, WAVE_SESSION_TARGET[0]);
-  assert.equal(getWaveConfig(999).target, WAVE_SESSION_TARGET.at(-1));
-});
-
-test("session claims combine distinct facts and carry exactly one false or corrupted line, and are seed-reproducible", () => {
-  const catalog = createFactCatalog(snapshot);
-  const factsById = new Map(catalog.map((fact) => [fact.id, fact]));
-
-  for (let waveIndex = 0; waveIndex < TOTAL_ROUNDS; waveIndex += 1) {
-    const { target, factsPerClaim } = getWaveConfig(waveIndex);
-    const sessions = createSessionClaims(catalog, waveIndex, "seed-a");
-    assert.equal(sessions.length, target);
-
-    for (const session of sessions) {
-      assert.ok(["true", "false", "corrupted"].includes(session.zone));
-      assert.equal(session.parts.length, factsPerClaim);
-      assert.equal(new Set(session.parts.map((part) => part.factId)).size, factsPerClaim);
-
-      const matchCounts = { truthText: 0, lieText: 0, decoyText: 0 };
-      for (const part of session.parts) {
-        const fact = factsById.get(part.factId);
-        assert.ok(fact);
-        assert.equal(part.trustedText, fact.truthText);
-        for (const field of ["truthText", "lieText", "decoyText"]) {
-          if (part.text === fact[field]) matchCounts[field] += 1;
-        }
-      }
-      if (session.zone === "true") {
-        assert.equal(matchCounts.lieText, 0);
-        assert.equal(matchCounts.decoyText, 0);
-      } else if (session.zone === "false") {
-        assert.equal(matchCounts.lieText, 1);
-        assert.equal(matchCounts.decoyText, 0);
-      } else {
-        assert.equal(matchCounts.decoyText, 1);
-      }
-    }
-  }
-
-  assert.deepEqual(
-    createSessionClaims(catalog, 3, "reproduce-me"),
-    createSessionClaims(catalog, 3, "reproduce-me"),
-  );
-  assert.notDeepEqual(
-    createSessionClaims(catalog, 3, "seed-a").map((session) => session.parts),
-    createSessionClaims(catalog, 3, "seed-b").map((session) => session.parts),
-  );
-});
-
-test("corrupted session chance rises across waves as configured", () => {
-  const catalog = createFactCatalog(snapshot);
-  const sampleCorruptedRatio = (waveIndex) => {
-    let corrupted = 0;
-    let total = 0;
-    for (let sample = 0; sample < 40; sample += 1) {
-      const sessions = createSessionClaims(catalog, waveIndex, `sample-${sample}`);
-      corrupted += sessions.filter((session) => session.zone === "corrupted").length;
-      total += sessions.length;
-    }
-    return corrupted / total;
-  };
-
-  assert.equal(sampleCorruptedRatio(0), 0);
-  const laterRatio = sampleCorruptedRatio(5);
-  assert.ok(laterRatio > 0.15);
-});
-
-test("score rewards remaining time and streak without exceeding its cap", () => {
-  assert.equal(scoreCorrectAnswer(0, 0), 500);
-  assert.equal(scoreCorrectAnswer(1, 1), 1_060);
-  assert.equal(scoreCorrectAnswer(1.5, 99), 1_300);
-});
-
-test("deep verify adds a base wager and doubles an error's integrity loss", () => {
-  assert.equal(DEEP_VERIFY_BONUS, 350);
-  assert.equal(DEEP_VERIFY_INTEGRITY_LOSS, 2);
-  assert.equal(scoreCorrectAnswer(1, 1, true), 1_410);
-  assert.equal(getWrongJudgmentLoss("approved-spoofed"), 2);
-  assert.equal(getWrongJudgmentLoss("rejected-genuine"), 1);
-  assert.equal(getWrongJudgmentLoss("misjudged-corrupted"), 1);
-  assert.equal(getWrongJudgmentLoss("rejected-genuine", true), 2);
-  assert.equal(getWrongJudgmentLoss("approved-spoofed", true), 2);
-});
-
-test("the final core doubles only the last round's deep verify reward", () => {
-  assert.equal(FINAL_CORE_DEEP_VERIFY_BONUS, 700);
-  assert.equal(getDeepVerifyBonus(0), DEEP_VERIFY_BONUS);
-  assert.equal(getDeepVerifyBonus(TOTAL_ROUNDS - 2), DEEP_VERIFY_BONUS);
-  assert.equal(
-    getDeepVerifyBonus(TOTAL_ROUNDS - 1),
-    FINAL_CORE_DEEP_VERIFY_BONUS,
-  );
-  assert.equal(
-    scoreCorrectAnswer(1, 1, true, FINAL_CORE_DEEP_VERIFY_BONUS),
-    1_760,
-  );
+test("a wrong click on a genuine signal costs more during the deep verify wager", () => {
+  assert.equal(getWrongClickLoss(), WRONG_CLICK_LOSS);
+  assert.equal(getWrongClickLoss(false), WRONG_CLICK_LOSS);
+  assert.equal(getWrongClickLoss(true), WRONG_CLICK_LOSS_DEEP_VERIFY);
+  assert.equal(WRONG_CLICK_LOSS_DEEP_VERIFY, WRONG_CLICK_LOSS * 2);
 });
 
 test("run directives rotate and complete only at their stated thresholds", () => {
   assert.equal(RUN_DIRECTIVE_BONUS, 600);
-  assert.equal(getRunDirective(0, 0).id, "sync");
-  assert.equal(getRunDirective(1, 1).id, "clean");
-  assert.equal(getRunDirective(2, 2).id, "wager");
-  assert.equal(getRunDirective(3, 3).id, "sync");
+  assert.equal(getRunDirective(0, 0).id, "combo");
+  assert.equal(getRunDirective(1, 1).id, "wager");
+  assert.equal(getRunDirective(2, 2).id, "clean");
+  assert.equal(getRunDirective(3, 3).id, "combo");
 
-  assert.equal(getRunDirectiveStatus("sync", { maxStreak: 3 }).completed, false);
+  assert.equal(getRunDirectiveStatus("combo", { maxCombo: 7 }).completed, false);
   assert.deepEqual(
-    getRunDirectiveStatus("sync", { maxStreak: 4 }),
+    getRunDirectiveStatus("combo", { maxCombo: 8 }),
     {
-      id: "sync",
-      code: "SYNC CHAIN",
-      label: "연속 정답 4회 달성",
-      target: 4,
+      id: "combo",
+      code: "COMBO CHAIN",
+      label: "최고 콤보 ×8 달성",
+      target: 8,
       bonus: RUN_DIRECTIVE_BONUS,
-      value: 4,
-      progress: "4/4",
+      value: 8,
+      progress: "8/8",
       completed: true,
     },
   );
-  assert.equal(
-    getRunDirectiveStatus("wager", { deepVerifyWins: 1 }).completed,
-    false,
-  );
-  assert.equal(
-    getRunDirectiveStatus("wager", { deepVerifyWins: 2 }).completed,
-    true,
-  );
-  assert.equal(
-    getRunDirectiveStatus("clean", { integrity: 3, ending: null }).completed,
-    false,
-  );
-  assert.equal(
-    getRunDirectiveStatus("clean", { integrity: 3, ending: "verified" }).completed,
-    true,
-  );
-  assert.equal(
-    getRunDirectiveStatus("clean", { integrity: 2, ending: "verified" }).completed,
-    false,
-  );
+  assert.equal(getRunDirectiveStatus("wager", { deepVerifyPurges: 2 }).completed, false);
+  assert.equal(getRunDirectiveStatus("wager", { deepVerifyPurges: 3 }).completed, true);
+  assert.equal(getRunDirectiveStatus("clean", { wrongClicks: 0, ending: null }).completed, false);
+  assert.equal(getRunDirectiveStatus("clean", { wrongClicks: 0, ending: "verified" }).completed, true);
+  assert.equal(getRunDirectiveStatus("clean", { wrongClicks: 1, ending: "verified" }).completed, false);
   assert.equal(getRunDirectiveStatus("unknown", {}), null);
 });
 
-test("verification gate shows progress, success, and an unrecoverable run", () => {
-  assert.deepEqual(
-    getAuditGateStatus({ correct: 0, answered: 0, integrity: 3 }),
-    { state: "active", label: "5 MORE", needed: 5 },
-  );
-  assert.deepEqual(
-    getAuditGateStatus({ correct: 5, answered: 5, integrity: 1 }),
-    { state: "open", label: "GATE OPEN", needed: 0 },
-  );
-  assert.deepEqual(
-    getAuditGateStatus({ correct: 1, answered: 3, integrity: 1 }),
-    { state: "lost", label: "GATE LOST", needed: 4 },
-  );
-  assert.equal(
-    getAuditGateStatus({ correct: 3, answered: 3, integrity: 0 }).state,
-    "lost",
-  );
-});
-
-test("three-answer sync can recover the latest failed round only once", () => {
-  const outcomes = ["wrong", "correct", "timeout", "correct", "correct", "correct"];
-  assert.equal(SYNC_RECOVERY_STREAK, 3);
-  assert.equal(getSyncRecoveryIndex({ outcomes, streak: 2 }), -1);
-  assert.equal(getSyncRecoveryIndex({ outcomes, streak: 3 }), 2);
-  assert.equal(getSyncRecoveryIndex({ outcomes, streak: 4, used: true }), -1);
-  assert.equal(
-    getSyncRecoveryIndex({ outcomes: ["correct", "recovered", "correct"], streak: 3 }),
-    -1,
-  );
-});
-
-test("result rank distinguishes perfect, surviving, and failed audits", () => {
-  assert.equal(getResult({ score: 6_000, correct: 6, integrity: 3 }).rank, "S");
-  assert.equal(
-    getResult({ score: 6_000, correct: 6, integrity: 3, recoveryUsed: true }).rank,
-    "A",
-  );
-  assert.equal(getResult({ score: 4_000, correct: 5, integrity: 1 }).rank, "A");
-  assert.equal(getResult({ score: 2_000, correct: 2, integrity: 1 }).rank, "C");
-  assert.equal(getResult({ score: 4_000, correct: 5, integrity: 0 }).rank, "NULL");
+test("result rank distinguishes a perfect defense, a survived run, and a breached core", () => {
+  assert.equal(getResult({ score: 9_000, purges: 20, wrongClicks: 0, missedFakes: 0, integrity: 3 }).rank, "S");
+  assert.equal(getResult({ score: 6_000, purges: 16, wrongClicks: 1, missedFakes: 2, integrity: 2 }).rank, "A");
+  assert.equal(getResult({ score: 3_000, purges: 8, wrongClicks: 2, missedFakes: 5, integrity: 1 }).rank, "B");
+  assert.equal(getResult({ score: 1_000, purges: 2, wrongClicks: 3, missedFakes: 8, integrity: 1 }).rank, "C");
+  assert.equal(getResult({ score: 4_000, purges: 10, wrongClicks: 0, missedFakes: 1, integrity: 0 }).rank, "NULL");
+  assert.equal(getResult({ score: 0, purges: 0, wrongClicks: 0, missedFakes: 0, integrity: 3 }).rank, "S");
 });
 
 test("run style tag picks the most distinctive way a run was played", () => {
-  assert.equal(getRunStyleTag({ syncRecoveryUsed: true, deepVerifyWins: 3 }), "RECOVERY");
-  assert.equal(getRunStyleTag({ deepVerifyWins: 2, wrongCount: 0, maxStreak: 5 }), "RISK");
-  assert.equal(getRunStyleTag({ deepVerifyWins: 0, wrongCount: 0, maxStreak: 5 }), "PRECISION");
-  assert.equal(getRunStyleTag({ deepVerifyWins: 0, wrongCount: 2, maxStreak: 3 }), "SPEED");
+  assert.equal(getRunStyleTag({ deepVerifyPurges: 2, wrongClicks: 1, maxCombo: 5 }), "RISK");
+  assert.equal(getRunStyleTag({ deepVerifyPurges: 0, wrongClicks: 0, maxCombo: 5 }), "PRECISION");
+  assert.equal(getRunStyleTag({ deepVerifyPurges: 0, wrongClicks: 2, maxCombo: 3, lensUses: 2 }), "STEADY");
+  assert.equal(getRunStyleTag({ deepVerifyPurges: 0, wrongClicks: 2, maxCombo: 3, lensUses: 0 }), "SPEED");
   assert.equal(getRunStyleTag({}), "SPEED");
-  assert.ok(getRunStyleRemark("RECOVERY").length > 0);
+  assert.ok(getRunStyleRemark("RISK").length > 0);
   assert.equal(getRunStyleRemark("unknown-tag"), "");
 });
 
@@ -370,7 +186,7 @@ test("archive lens charges grow with recovered fragments and stop at three", () 
   assert.equal(getArchiveLensCharges("invalid"), 2);
 });
 
-test("only a verified audit awards the next memory fragment", () => {
+test("only a verified run awards the next memory fragment", () => {
   assert.equal(getFragmentReward(2, "verified"), 3);
   assert.equal(getFragmentReward(2, "unstable"), 2);
   assert.equal(getFragmentReward(2, null), 2);

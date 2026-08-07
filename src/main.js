@@ -2,31 +2,29 @@ import "./styles.css";
 
 import { AudioEngine } from "./audio.js";
 import {
-  DEEP_VERIFY_BONUS,
+  DEEP_VERIFY_WINDOW_MS,
+  LENS_BOOST_MS,
+  LENS_EXTEND_BONUS_MS,
   MAX_INTEGRITY,
   MAX_MEMORY_FRAGMENTS,
-  PLAY_INSTRUCTION,
-  SYNC_RECOVERY_STREAK,
-  TOTAL_ROUNDS,
-  VERIFIED_CORRECT_REQUIRED,
+  RUN_DURATION_MS,
+  SLOT_COUNT,
   clamp,
-  createFactCatalog,
-  createSessionClaims,
   formatScore,
   getArchiveLensCharges,
-  getAuditGateStatus,
-  getDeepVerifyBonus,
   getFragmentReward,
+  getMaxConcurrentSignals,
   getMoriArchiveRecord,
   getResult,
   getRunDirective,
   getRunDirectiveStatus,
   getRunStyleRemark,
   getRunStyleTag,
-  getSyncRecoveryIndex,
-  getWaveConfig,
-  getWrongJudgmentLoss,
-  scoreCorrectAnswer,
+  getSignalLifespanMs,
+  getSpawnIntervalMs,
+  getWrongClickLoss,
+  pickSignalKind,
+  scorePurge,
 } from "./game-logic.js";
 import {
   EMPTY_MEMORY,
@@ -52,7 +50,6 @@ const elements = {
   moriPresenceLabel: element("mori-presence-label"),
   moriStateLabel: element("mori-state-label"),
   moriStateThumbImg: element("mori-state-thumb-img"),
-  roundImpactPortraitImg: element("round-impact-portrait-img"),
   moriDialogue: element("mori-dialogue"),
   resultMoriDialogue: element("result-mori-dialogue"),
   introScreen: element("intro-screen"),
@@ -85,9 +82,6 @@ const elements = {
   roundTime: element("round-time"),
   scoreValue: element("score-value"),
   integrityPips: element("integrity-pips"),
-  auditProgress: element("audit-progress"),
-  auditGateValue: element("audit-gate-value"),
-  auditReward: element("audit-reward"),
   syncStatus: element("sync-status"),
   syncValue: element("sync-value"),
   syncBonus: element("sync-bonus"),
@@ -97,23 +91,12 @@ const elements = {
   deepVerifyButton: element("deep-verify-button"),
   deepVerifyKicker: element("deep-verify-kicker"),
   deepVerifyLabel: element("deep-verify-label"),
-  terminalRoom: element("terminal-room"),
-  operatorAvatar: element("operator-avatar"),
-  terminalNodes: [...document.querySelectorAll(".terminal-node")],
-  triageLane: element("triage-lane"),
-  zoneTrue: element("zone-true"),
-  zoneFalse: element("zone-false"),
-  zoneCorrupted: element("zone-corrupted"),
+  signalField: element("signal-field"),
+  signalSlots: [...document.querySelectorAll(".signal-slot")],
   waveProgress: element("wave-progress"),
   boardInstruction: element("board-instruction"),
   directiveReadout: element("directive-readout"),
   roundFeedback: element("round-feedback"),
-  roundImpact: element("round-impact"),
-  roundImpactLabel: element("round-impact-label"),
-  roundImpactValue: element("round-impact-value"),
-  roundImpactDetail: element("round-impact-detail"),
-  roundContinueButton: element("round-continue-button"),
-  roundContinueLabel: element("round-continue-label"),
   resultKicker: element("result-kicker"),
   resultGlyph: element("result-glyph"),
   resultHeading: element("result-heading"),
@@ -138,7 +121,6 @@ const elements = {
 };
 
 const audio = new AudioEngine();
-const darkModeQuery = window.matchMedia("(prefers-color-scheme: dark)");
 const reducedMotionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
 
 const runtime = {
@@ -149,56 +131,42 @@ const runtime = {
   adapter: "SCANNING",
   sessionId: "----",
   inputMode: null,
-  tabLeft: false,
-  peerPresent: false,
-  peerLastSeenAt: 0,
   stateRevision: 0,
-  snapshot: null,
-  catalog: [],
-  seed: "",
-  roundIndex: 0,
+
+  slots: [],
+  runStartAt: 0,
+  pausedAt: 0,
+  nextSpawnAt: 0,
+  lastFrameAt: 0,
+  animationFrame: 0,
+  clockTenths: -1,
+
   score: 0,
   integrity: MAX_INTEGRITY,
-  correct: 0,
-  streak: 0,
-  syncRecoveryUsed: false,
-  deepVerifyBonus: DEEP_VERIFY_BONUS,
-  deepVerifyArmed: false,
-  deepVerifyUsedWaveIndex: -1,
+  combo: 0,
+  maxCombo: 0,
+  purges: 0,
+  wrongClicks: 0,
+  missedFakes: 0,
+
+  deepVerifyUntil: 0,
+  deepVerifyUsed: false,
+  deepVerifyPurges: 0,
+
+  lensCharges: 2,
+  lensMaxCharges: 2,
+  lensUses: 0,
+  lensBoostUntil: 0,
+
   directive: null,
   directiveCompleted: false,
   directiveBonusAwarded: false,
-  maxStreak: 0,
-  deepVerifyWins: 0,
-  wrongCount: 0,
-  missedCount: 0,
-  outcomes: [],
-  lensCharges: 2,
-  lensMaxCharges: 1,
-  lensUsedRoundIndex: -1,
+
   locked: false,
-  waveConfig: null,
-  waveSessions: [],
-  currentSession: null,
-  terminals: [],
-  spawnQueue: [],
-  dockedIndex: -1,
-  moveTargetIndex: -1,
-  avatar: { x: 0, y: 0, vx: 0, vy: 0 },
-  keysDown: new Set(),
-  waveCorrect: 0,
-  waveWrong: 0,
-  waveMissed: 0,
-  moriPulseTimer: 0,
-  lastFrameAt: 0,
-  animationFrame: 0,
-  advanceTimer: 0,
-  impactTimer: 0,
   toastTimer: 0,
-  resizeTimer: 0,
+  moriPulseTimer: 0,
   lastResult: null,
   pendingFragments: 0,
-  clockTenths: -1,
 };
 
 const MORI_STATES = {
@@ -214,63 +182,38 @@ const MORI_STATES = {
   },
   observing: {
     label: "OBSERVING",
-    caption: "MORI // AUDIT ACTIVE",
-    dialogue: "일지와 신호를 같이 봐. 답은 늘 둘 사이에 있어.",
-  },
-  "time-critical": {
-    label: "TIME FRACTURE",
-    caption: "MORI // FIVE SECONDS",
-    dialogue: "5초 남았어. 처음 읽은 흔적을 믿어.",
+    caption: "MORI // CORE WATCH",
+    dialogue: "신호가 들어오기 시작했어. 가짜만 지워.",
   },
   "answer-correct": {
-    label: "TRACE ACCEPTED",
+    label: "SIGNAL PURGED",
     caption: "MORI // CONFIRMED",
-    dialogue: "응, 그 흔적이 맞아. 내 일지를 읽을 줄 아네.",
+    dialogue: "좋아, 그건 진짜 가짜였어.",
   },
   "sync-linked": {
-    label: "SYNC LINKED",
+    label: "COMBO LINKED",
     caption: "MORI // SAME FREQUENCY",
-    dialogue: "지금 호흡 좋아. 이대로 나랑 같은 기록을 봐.",
-  },
-  "sync-recovery": {
-    label: "TRACE RESTORED",
-    caption: "MORI // SYNC RECOVERY",
-    dialogue: "세 흔적이 이어졌어. 아까 다친 색인 하나, 내가 되돌릴게.",
+    dialogue: "지금 손이 좋아. 이 속도 유지해.",
   },
   "directive-complete": {
     label: "REQUEST SEALED",
     caption: "MORI // REQUEST COMPLETE",
-    dialogue: "이번 부탁까지 정확히 끝냈네. 약속한 보너스, 일지에 바로 더할게.",
+    dialogue: "이번 부탁까지 정확히 끝냈네. 약속한 보너스, 바로 더할게.",
   },
   "answer-wrong": {
-    label: "INDEX HURT",
-    caption: "MORI // CORRUPTION",
-    dialogue: "그건 오염된 쪽이야. 다음 흔적은 더 선명하게 띄울게.",
+    label: "CORE HURT",
+    caption: "MORI // FALSE STRIKE",
+    dialogue: "그건 진짜였어. 다음 신호는 더 선명하게 띄울게.",
   },
   "lens-used": {
     label: "LENS FIRED",
-    caption: "MORI // ZONE REVEALED",
-    dialogue: "정답 구역, 미리 보여줄게. 확인하고 넣어.",
+    caption: "MORI // TIME EXTENDED",
+    dialogue: "잠깐 느려질게. 숨 고르고 다시 봐.",
   },
   "deep-verify": {
     label: "WAGER ARMED",
     caption: "MORI // DEEP VERIFY",
-    dialogue: "확신해? 좋아. 맞히면 더 깊게 새기고, 틀리면 두 칸이 찢어져.",
-  },
-  "core-final": {
-    label: "CORE EXPOSED",
-    caption: "MORI // FINAL CORE",
-    dialogue: "마지막 핵심 색인이야. 이번 선택으로 일지를 같이 봉인하자.",
-  },
-  "tab-left": {
-    label: "YOU LEFT",
-    caption: "MORI // HIDDEN TRACE",
-    dialogue: "잠깐 다른 곳을 봤지? 괜찮아. 그 흔적도 기록이니까.",
-  },
-  "other-self": {
-    label: "OTHER SELF",
-    caption: "MORI // DUPLICATE TAB",
-    dialogue: "같은 페이지가 하나 더 있어. 어느 쪽이 진짜 너지?",
+    dialogue: "확신해? 좋아. 5초 동안 두 배로 걸게.",
   },
   "result-verified": {
     label: "ARCHIVE SEALED",
@@ -280,7 +223,7 @@ const MORI_STATES = {
   "result-unstable": {
     label: "INDEX DAMAGED",
     caption: "MORI // UNSTABLE",
-    dialogue: "이번 일지는 봉인할 수 없어. 돌아올 자리는 남겨 둘게.",
+    dialogue: "이번 코어는 지켜내지 못했어. 돌아올 자리는 남겨 둘게.",
   },
   "archive-complete": {
     label: "I REMEMBER",
@@ -289,90 +232,35 @@ const MORI_STATES = {
   },
 };
 
-const WAVE_MORI_DIALOGUE = [
-  "세션이 들어오기 시작했어. 한 줄씩 놓치지 말고 봐.",
-  "이제 결합된 주장이 나올 거야. 한 줄이라도 다르면 전체가 위조야.",
-  "판독 불가한 줄도 섞여. 억지로 판단하지 말고 보류해.",
-  "시간이 짧아질 거야. 놓치는 것보다 잘못 승인하는 게 더 아파.",
-  "거의 다 왔어. 속도보다 정확도.",
-  "마지막 코어야. 지금까지 중 가장 정교한 위장이 온다.",
-];
-
-const ZONE_LABELS = {
-  true: "진짜",
-  false: "가짜",
-  corrupted: "손상",
-};
-
-const WRONG_ZONE_HINT = {
-  true: "그건 진실 쪽이었어. 다음 흔적은 더 선명하게 띄울게.",
-  false: "그건 거짓 쪽이었어. 다음 흔적은 더 선명하게 띄울게.",
-  corrupted: "그건 오염된 쪽이었어. 다음 흔적은 더 선명하게 띄울게.",
-};
+const SIGNAL_ICON = { fake: "✕", genuine: "◆" };
 
 elements.memoryButtons.forEach((button) => {
   button.disabled = true;
 });
 
-const AVATAR_MAX_SPEED = 220;
-const AVATAR_ACCEL = 1_500;
-const AVATAR_FRICTION = 2_000;
-const AVATAR_MARGIN = 12;
-const DOCK_RADIUS = 34;
-
-function initTerminalRoom() {
-  runtime.terminals = elements.terminalNodes.map((el, index) => ({
+function initSignalField() {
+  runtime.slots = elements.signalSlots.map((el, index) => ({
     index,
-    tx: Number.parseFloat(el.style.getPropertyValue("--tx")) || 50,
-    ty: Number.parseFloat(el.style.getPropertyValue("--ty")) || 50,
     el,
-    ring: el.querySelector(".terminal-ring"),
+    ring: el.querySelector(".signal-ring"),
+    icon: el.querySelector(".signal-icon"),
     state: "idle",
-    session: null,
+    kind: null,
     deadline: 0,
     totalMs: 0,
   }));
 
-  elements.terminalNodes.forEach((node, index) => {
-    node.addEventListener("click", () => setMoveTarget(index));
+  elements.signalSlots.forEach((node, index) => {
+    node.addEventListener("click", () => activateSlot(index));
   });
 }
 
-function setMoveTarget(index) {
-  if (runtime.mode !== "play" || runtime.locked) return;
-  const terminal = runtime.terminals[index];
-  if (!terminal || (terminal.state !== "pending" && terminal.state !== "active")) return;
-  runtime.moveTargetIndex = index;
-}
-
-initTerminalRoom();
+initSignalField();
 
 function createSessionId() {
   const buffer = new Uint32Array(1);
   crypto.getRandomValues(buffer);
   return buffer[0].toString(16).toUpperCase().padStart(8, "0").slice(0, 8);
-}
-
-function getSnapshot() {
-  const hour = new Date().getHours();
-  return {
-    visitCount: runtime.memory.visits,
-    lastEnding: runtime.memory.lastEnding,
-    fragments: runtime.memory.fragments,
-    runs: runtime.memory.runs,
-    bestScore: runtime.memory.bestScore,
-    policy: runtime.memory.policy,
-    theme: darkModeQuery.matches ? "dark" : "light",
-    timePhase: hour >= 6 && hour < 18 ? "day" : "night",
-    inputMode: runtime.inputMode ?? "mouse",
-    tabLeft: runtime.tabLeft,
-    peerPresent: runtime.peerPresent,
-    viewport: window.innerWidth >= 720 ? "wide" : "narrow",
-    motion: reducedMotionQuery.matches ? "reduced" : "full",
-    network: navigator.onLine ? "online" : "offline",
-    localHour: hour,
-    viewportWidth: window.innerWidth,
-  };
 }
 
 function recordInput(mode) {
@@ -418,7 +306,6 @@ function setMoriState(state, dialogueOverride = "") {
   elements.moriDialogue.textContent = dialogueOverride || copy.dialogue;
   elements.resultMoriDialogue.textContent = dialogueOverride || copy.dialogue;
   elements.moriStateThumbImg.src = `./mori/mori_${portraitState}.webp`;
-  elements.roundImpactPortraitImg.src = `./mori/mori_${portraitState}.webp`;
 }
 
 function updateTelemetry() {
@@ -477,15 +364,15 @@ function renderIntro(messageOverride = "") {
   elements.firstVisitActions.hidden = returning;
   elements.returnStartButton.hidden = !returning;
   elements.returnStartLabel.textContent = archiveComplete
-    ? "완성된 일지 다시 감사"
-    : "기억 검사 다시 시작";
+    ? "완성된 일지 다시 방어"
+    : "코어 방어 다시 시작";
   elements.missionBrief.dataset.state = archiveComplete ? "complete" : "next";
   elements.missionBriefLabel.textContent = archiveComplete ? "ARCHIVE COMPLETE" : "NEXT FILE";
   elements.missionBriefCopy.textContent = archiveComplete
     ? "여섯 MORI 파일을 모두 복구했습니다. 최고 점수 "
       + formatScore(runtime.memory.bestScore)
-      + "와 6연속 SYNC에 도전하세요."
-    : "여섯 번 중 다섯 번 이상 검증하면 "
+      + "에 도전하세요."
+    : "60초 런에서 A랭크 이상으로 코어를 지켜내면 "
       + nextRecord.code
       + " ‘"
       + nextRecord.title
@@ -502,7 +389,7 @@ function renderIntro(messageOverride = "") {
   if (returning && archiveComplete) {
     elements.introHeading.textContent = "여섯 파일을 전부 기억하고 있어요.";
     elements.introMessage.textContent = runtime.memory.runs
-      + "번의 감사와 최고 점수 "
+      + "번의 방어와 최고 점수 "
       + formatScore(runtime.memory.bestScore)
       + "가 남아 있습니다. ARCHIVE LENS "
       + lensCharges
@@ -523,7 +410,7 @@ function renderIntro(messageOverride = "") {
     elements.introHeading.textContent = messageOverride || "MORI의 기억이 비어 있습니다.";
     elements.introMessage.textContent = messageOverride
       ? "게임 쿠키가 삭제되었습니다. 기억 방식을 다시 고르면 새로운 일지에서 시작합니다."
-      : "브라우저 흔적을 해석해 첫 기억 조각을 복구하세요. 게임 진행 정보만 쿠키에 남고 개인정보는 저장하지 않습니다.";
+      : "코어를 지켜 첫 기억 조각을 복구하세요. 게임 진행 정보만 쿠키에 남고 개인정보는 저장하지 않습니다.";
     elements.terminalStatus.textContent = "MEMORY EMPTY";
     updateMemoryRoute("ledger/unindexed");
     setMoriState("boot-empty");
@@ -599,80 +486,148 @@ function updateSoundButton() {
   elements.soundLabel.textContent = audio.enabled ? "소리 켜짐" : "소리 꺼짐";
 }
 
-function cancelRoundTimers() {
+function cancelRunTimers() {
   window.cancelAnimationFrame(runtime.animationFrame);
-  window.clearTimeout(runtime.advanceTimer);
-  window.clearTimeout(runtime.impactTimer);
   window.clearTimeout(runtime.moriPulseTimer);
   runtime.animationFrame = 0;
-  runtime.advanceTimer = 0;
-  runtime.impactTimer = 0;
   runtime.moriPulseTimer = 0;
-}
-
-function resetRoundImpact() {
-  window.clearTimeout(runtime.impactTimer);
-  runtime.impactTimer = 0;
-  elements.roundImpact.dataset.state = "idle";
-  elements.roundContinueButton.hidden = true;
-}
-
-function showRoundImpact(state, label, value, detail, autoHideMs = 0) {
-  window.clearTimeout(runtime.impactTimer);
-  elements.roundImpact.dataset.state = "idle";
-  elements.roundImpactLabel.textContent = label;
-  elements.roundImpactValue.textContent = value;
-  elements.roundImpactDetail.textContent = detail;
-  void elements.roundImpact.offsetWidth;
-  elements.roundImpact.dataset.state = state;
-  if (autoHideMs > 0) {
-    runtime.impactTimer = window.setTimeout(() => {
-      elements.roundImpact.dataset.state = "idle";
-      runtime.impactTimer = 0;
-    }, autoHideMs);
-  }
 }
 
 const clamp01 = (value) => Math.min(1, Math.max(0, value));
 
-function getRoomRect() {
-  return elements.terminalRoom.getBoundingClientRect();
+function pulseMoriState(state, dialogueOverride = "") {
+  window.clearTimeout(runtime.moriPulseTimer);
+  setMoriState(state, dialogueOverride);
+  runtime.moriPulseTimer = window.setTimeout(() => {
+    if (runtime.mode !== "play" || runtime.locked) return;
+    setMoriState("observing");
+  }, 900);
 }
 
-function getTerminalPixelPos(terminal, roomRect) {
-  return {
-    x: (terminal.tx / 100) * roomRect.width,
-    y: (terminal.ty / 100) * roomRect.height,
-  };
+function getActiveDirectiveStatus(ending = null) {
+  if (!runtime.directive) return null;
+  return getRunDirectiveStatus(runtime.directive.id, {
+    maxCombo: runtime.maxCombo,
+    deepVerifyPurges: runtime.deepVerifyPurges,
+    wrongClicks: runtime.wrongClicks,
+    ending,
+  });
 }
 
-function renderTimeHud(remainingMs, totalMs) {
-  const totalSafe = totalMs > 0 ? totalMs : 1;
-  const critical = remainingMs / totalSafe <= 0.3;
+function awardRunDirectiveBonus(ending) {
+  const status = getActiveDirectiveStatus(ending);
+  if (!status?.completed || runtime.directiveBonusAwarded) return 0;
+  runtime.directiveCompleted = true;
+  runtime.directiveBonusAwarded = true;
+  return status.bonus;
+}
+
+function renderResultDirective(ending) {
+  const status = getActiveDirectiveStatus(ending);
+  if (!status) return;
+  elements.resultDirective.dataset.state = status.completed ? "complete" : "missed";
+  elements.resultDirectiveCopy.textContent = status.completed
+    ? `${status.code} · ${status.progress} · COMPLETE +${status.bonus}`
+    : `${status.code} · ${status.progress} · INCOMPLETE`;
+  elements.resultDirective.setAttribute(
+    "aria-label",
+    status.completed
+      ? `MORI REQUEST 완료. ${status.label}. 보너스 ${status.bonus}점.`
+      : `MORI REQUEST 미완료. ${status.label}. 진행 ${status.progress}.`,
+  );
+}
+
+function updateDirectiveReadout() {
+  const status = getActiveDirectiveStatus();
+  if (!status) return;
+  elements.directiveReadout.dataset.state = status.completed ? "complete" : "active";
+  elements.directiveReadout.textContent = `MORI REQUEST · ${status.code} · ${status.progress} · +${status.bonus}`;
+  elements.directiveReadout.setAttribute(
+    "aria-label",
+    `MORI REQUEST ${status.label}. 진행 ${status.progress}. 완료 보너스 ${status.bonus}점.`,
+  );
+}
+
+function updateLensStatus() {
+  let state = "READY";
+  if (runtime.lensCharges <= 0) state = "EMPTY";
+  else if (performance.now() < runtime.lensBoostUntil) state = "ACTIVE";
+
+  elements.lensCount.textContent = `${String(runtime.lensCharges).padStart(2, "0")} / ${String(runtime.lensMaxCharges).padStart(2, "0")}`;
+  elements.lensState.textContent = state;
+  elements.lensButton.dataset.state = state.toLowerCase();
+  elements.lensButton.disabled = runtime.mode !== "play" || runtime.locked || runtime.lensCharges <= 0;
+  elements.lensButton.setAttribute(
+    "aria-label",
+    `ARCHIVE LENS. ${runtime.lensCharges}/${runtime.lensMaxCharges}회 남음. 상태 ${state}. 단축키 F.`,
+  );
+}
+
+function updateDeepVerifyStatus() {
+  const now = performance.now();
+  const active = now < runtime.deepVerifyUntil;
+  const available = runtime.mode === "play" && !runtime.locked && !runtime.deepVerifyUsed;
+
+  elements.deepVerifyButton.disabled = !available && !active;
+  elements.deepVerifyButton.dataset.active = String(active);
+  elements.deepVerifyButton.setAttribute("aria-pressed", String(active));
+  elements.screenStack.dataset.deepVerify = String(active);
+  elements.deepVerifyLabel.textContent = active
+    ? `ON · 남은 시간 ${Math.max(0, (runtime.deepVerifyUntil - now) / 1_000).toFixed(1)}초 · 정화 2배 / 오클릭 -2`
+    : runtime.deepVerifyUsed
+      ? "SETTLED · 이번 런에서 모두 사용"
+      : "OFF · 정화 2배 점수 / 오클릭 코어 -2";
+  elements.deepVerifyButton.setAttribute(
+    "aria-label",
+    active
+      ? "DEEP VERIFY 켜짐. 정화 점수 2배, 오클릭 시 코어 2칸 손실."
+      : available
+        ? "DEEP VERIFY 대기. 단축키 D로 5초 동안 정화 2배, 오클릭 2배 손실을 겁니다. 런당 한 번만 사용할 수 있습니다."
+        : "DEEP VERIFY는 이번 런에서 이미 사용했습니다.",
+  );
+}
+
+function updateHud() {
+  elements.scoreValue.textContent = formatScore(runtime.score);
+  const pips = [...elements.integrityPips.children];
+  pips.forEach((pip, index) => {
+    pip.classList.toggle("is-empty", index >= runtime.integrity);
+  });
+  elements.integrityPips.setAttribute("aria-label", `코어 무결성 ${runtime.integrity} / ${MAX_INTEGRITY}`);
+
+  const comboBonus = clamp(runtime.combo, 0, 12) * 20;
+  elements.syncValue.textContent = runtime.combo > 12 ? "×12+" : `×${runtime.combo}`;
+  elements.syncBonus.textContent = `+${String(comboBonus).padStart(3, "0")}`;
+  elements.syncStatus.dataset.active = String(runtime.combo > 0);
+  elements.syncStatus.setAttribute(
+    "aria-label",
+    `콤보 ${runtime.combo}, 현재 콤보 보너스 ${comboBonus}.`,
+  );
+
+  elements.waveProgress.textContent =
+    `정화 ${runtime.purges} · 오클릭 ${runtime.wrongClicks} · 놓침 ${runtime.missedFakes}`;
+  elements.waveProgress.setAttribute(
+    "aria-label",
+    `정화 ${runtime.purges}회, 오클릭 ${runtime.wrongClicks}회, 놓침 ${runtime.missedFakes}회.`,
+  );
+
+  updateLensStatus();
+  updateDeepVerifyStatus();
+  updateDirectiveReadout();
+}
+
+function renderTimeHud(remainingMs) {
+  const critical = remainingMs / RUN_DURATION_MS <= 0.2;
   elements.screenStack.dataset.timePressure = String(critical);
 
   const clockTenths = Math.ceil(remainingMs / 100);
   if (clockTenths === runtime.clockTenths) return;
 
   runtime.clockTenths = clockTenths;
-  const seconds = (clockTenths / 10).toFixed(1);
+  const seconds = Math.max(0, clockTenths / 10).toFixed(1);
   elements.roundTime.textContent = seconds;
-  elements.roundTimeBlock.setAttribute("aria-label", `가장 급한 터미널 남은 시간 ${seconds}초`);
+  elements.roundTimeBlock.setAttribute("aria-label", `남은 시간 ${seconds}초`);
   elements.roundTimeBlock.dataset.state = critical ? "critical" : "active";
-}
-
-function advanceRound() {
-  if (runtime.mode !== "play" || !runtime.locked) return;
-  window.clearTimeout(runtime.advanceTimer);
-  runtime.advanceTimer = 0;
-  runtime.roundIndex += 1;
-  startWave();
-}
-
-function createDeck() {
-  runtime.snapshot = getSnapshot();
-  runtime.catalog = createFactCatalog(runtime.snapshot);
-  runtime.seed = `${runtime.sessionId}:${runtime.memory.visits}:${runtime.memory.runs}:${runtime.stateRevision}`;
 }
 
 async function startGame(policy = null) {
@@ -685,850 +640,221 @@ async function startGame(policy = null) {
     updateStorageLabel(await saveMemory(runtime.memory));
   }
 
-  runtime.tabLeft = false;
   runtime.stateRevision += 1;
-  runtime.roundIndex = 0;
   runtime.score = 0;
   runtime.integrity = MAX_INTEGRITY;
-  runtime.correct = 0;
-  runtime.streak = 0;
-  runtime.syncRecoveryUsed = false;
-  runtime.deepVerifyArmed = false;
-  runtime.deepVerifyUsedWaveIndex = -1;
-  runtime.deepVerifyBonus = DEEP_VERIFY_BONUS;
+  runtime.combo = 0;
+  runtime.maxCombo = 0;
+  runtime.purges = 0;
+  runtime.wrongClicks = 0;
+  runtime.missedFakes = 0;
+  runtime.deepVerifyUntil = 0;
+  runtime.deepVerifyUsed = false;
+  runtime.deepVerifyPurges = 0;
+  runtime.lensMaxCharges = getArchiveLensCharges(runtime.memory.fragments);
+  runtime.lensCharges = runtime.lensMaxCharges;
+  runtime.lensBoostUntil = 0;
+  runtime.lensUses = 0;
   runtime.directive = getRunDirective(runtime.memory.runs, runtime.memory.fragments);
   runtime.directiveCompleted = false;
   runtime.directiveBonusAwarded = false;
-  runtime.maxStreak = 0;
-  runtime.deepVerifyWins = 0;
-  runtime.wrongCount = 0;
-  runtime.missedCount = 0;
-  runtime.outcomes = Array(TOTAL_ROUNDS).fill(null);
-  runtime.lensMaxCharges = getArchiveLensCharges(runtime.memory.fragments);
-  runtime.lensCharges = runtime.lensMaxCharges;
-  runtime.lensUsedRoundIndex = -1;
   runtime.locked = false;
   runtime.lastResult = null;
   runtime.pendingFragments = runtime.memory.fragments;
-  createDeck();
-  updateTelemetry();
-  updateScoreAndIntegrity();
-  elements.terminalStatus.textContent = "AUDIT ACTIVE";
-  elements.screenStack.dataset.finalRound = "false";
-  updateMemoryRoute("audit/wave-01");
-  setMoriState("observing");
-  document.title = "[1/6] STATE//LESS";
+  runtime.clockTenths = -1;
+  runtime.slots.forEach((slot) => {
+    slot.state = "idle";
+    slot.kind = null;
+    updateSlotVisual(slot);
+  });
 
-  cancelRoundTimers();
+  updateTelemetry();
+  updateHud();
+  elements.terminalStatus.textContent = "CORE ACTIVE";
+  updateMemoryRoute("core/watch");
+  setMoriState("observing");
+  document.title = "STATE//LESS — SIGNAL STRIKE";
+
+  cancelRunTimers();
   runtime.mode = "play";
   await transitionTo("play");
   revealScreenOnStackedLayout(elements.playScreen);
   audio.start();
-  startWave();
+
+  const now = performance.now();
+  runtime.runStartAt = now;
+  runtime.nextSpawnAt = now + getSpawnIntervalMs(0);
+  runtime.lastFrameAt = 0;
+  runtime.animationFrame = window.requestAnimationFrame(gameLoop);
 }
 
-function updateLensStatus() {
-  const usedThisWave = runtime.lensUsedRoundIndex === runtime.roundIndex;
-  let state = "READY";
-  if (runtime.lensCharges <= 0) state = "EMPTY";
-  else if (usedThisWave) state = "NEXT WAVE";
-  else if (runtime.locked) state = "SCANNING";
-
-  elements.lensCount.textContent = `${String(runtime.lensCharges).padStart(2, "0")} / ${String(runtime.lensMaxCharges).padStart(2, "0")}`;
-  elements.lensState.textContent = state;
-  elements.lensButton.dataset.state = state.toLowerCase().replace(" ", "-");
-  elements.lensButton.disabled = runtime.mode !== "play"
-    || runtime.locked
-    || runtime.lensCharges <= 0
-    || usedThisWave;
-  elements.lensButton.setAttribute(
-    "aria-label",
-    `ARCHIVE LENS. ${runtime.lensCharges}/${runtime.lensMaxCharges}회 남음. 상태 ${state}. 단축키 F.`,
-  );
+function updateSlotVisual(slot) {
+  slot.el.dataset.state = slot.state;
+  slot.icon.textContent = slot.kind ? SIGNAL_ICON[slot.kind] : "";
 }
 
-function updateDeepVerifyStatus() {
-  const armed = runtime.deepVerifyArmed;
-  const usedThisWave = runtime.deepVerifyUsedWaveIndex === runtime.roundIndex;
-  const available = runtime.mode === "play"
-    && !runtime.locked
-    && !usedThisWave
-    && (armed || runtime.integrity > 1);
-  const finalCore = runtime.roundIndex === TOTAL_ROUNDS - 1;
-  const bonus = runtime.deepVerifyBonus;
-
-  elements.deepVerifyButton.disabled = !available;
-  elements.deepVerifyButton.dataset.active = String(armed);
-  elements.deepVerifyButton.setAttribute("aria-pressed", String(armed));
-  elements.screenStack.dataset.deepVerify = String(armed);
-  elements.deepVerifyKicker.textContent = finalCore
-    ? "FINAL WAGER · DEEP VERIFY ×2"
-    : "OPTIONAL WAGER · DEEP VERIFY";
-  elements.deepVerifyLabel.textContent = armed
-    ? `ON · 이번 판정 정답 +${bonus} / 오답 무결성 -2`
-    : usedThisWave
-      ? "SETTLED · 다음 웨이브에서 다시 사용"
-      : runtime.integrity <= 1
-        ? "LOCKED · 무결성 2칸 필요"
-        : `OFF · 정답 +${bonus} / 오답 무결성 -2`;
-  elements.deepVerifyButton.setAttribute(
-    "aria-label",
-    armed
-      ? `DEEP VERIFY 켜짐. 정답 추가 ${bonus}점, 오답 기억 무결성 2칸 손실.`
-      : available
-        ? `DEEP VERIFY 대기. 정답 추가 ${bonus}점, 오답 기억 무결성 2칸 손실. 단축키 D로 이번 판정에 걸기.`
-        : usedThisWave
-          ? "DEEP VERIFY 이번 웨이브에서 이미 사용했습니다. 다음 웨이브에서 다시 사용할 수 있습니다."
-          : "DEEP VERIFY 잠김. 기억 무결성이 2칸 이상일 때 사용할 수 있습니다.",
-  );
-}
-
-function getActiveDirectiveStatus(ending = null) {
-  if (!runtime.directive) return null;
-  return getRunDirectiveStatus(runtime.directive.id, {
-    maxStreak: runtime.maxStreak,
-    deepVerifyWins: runtime.deepVerifyWins,
-    integrity: runtime.integrity,
-    ending,
-  });
-}
-
-function getDirectiveProgressLabel(status, ending = null) {
-  if (!status) return "0/0";
-  if (status.id !== "clean") return status.progress;
-  if (ending === null) return `${status.progress} · VERIFIED 필요`;
-  return `${status.progress} · ${ending === "verified" ? "VERIFIED" : "NOT VERIFIED"}`;
-}
-
-function awardRunDirectiveBonus(ending = null) {
-  const status = getActiveDirectiveStatus(ending);
-  if (!status?.completed || runtime.directiveBonusAwarded) return 0;
-  runtime.directiveCompleted = true;
-  runtime.directiveBonusAwarded = true;
-  return status.bonus;
-}
-
-function renderResultDirective(ending) {
-  const status = getActiveDirectiveStatus(ending);
-  if (!status) return;
-  const progress = getDirectiveProgressLabel(status, ending);
-  elements.resultDirective.dataset.state = status.completed ? "complete" : "missed";
-  elements.resultDirectiveCopy.textContent = status.completed
-    ? `${status.code} · ${progress} · COMPLETE +${status.bonus}`
-    : `${status.code} · ${progress} · INCOMPLETE`;
-  elements.resultDirective.setAttribute(
-    "aria-label",
-    status.completed
-      ? `MORI REQUEST 완료. ${status.label}. 보너스 ${status.bonus}점.`
-      : `MORI REQUEST 미완료. ${status.label}. 진행 ${progress}.`,
-  );
-}
-
-function updateScoreAndIntegrity() {
-  elements.scoreValue.textContent = formatScore(runtime.score);
-  const pips = [...elements.integrityPips.children];
-  pips.forEach((pip, index) => {
-    pip.classList.toggle("is-empty", index >= runtime.integrity);
-  });
-  elements.integrityPips.setAttribute(
-    "aria-label",
-    `기억 무결성 ${runtime.integrity} / ${MAX_INTEGRITY}`,
-  );
-  const syncBonus = Math.min(runtime.streak, 5) * 60;
-  const failedOutcomeExists = runtime.outcomes.some(
-    (outcome) => outcome === "wrong" || outcome === "timeout",
-  );
-  const recoveryArmed = failedOutcomeExists && !runtime.syncRecoveryUsed;
-  const recoveryRemaining = Math.max(0, SYNC_RECOVERY_STREAK - runtime.streak);
-  elements.syncValue.textContent = runtime.streak > 5 ? "×5+" : `×${runtime.streak}`;
-  elements.syncBonus.textContent = recoveryArmed
-    ? `↺${recoveryRemaining} · +${String(syncBonus).padStart(3, "0")}`
-    : runtime.syncRecoveryUsed
-      ? `↺OK · +${String(syncBonus).padStart(3, "0")}`
-      : `+${String(syncBonus).padStart(3, "0")}`;
-  elements.syncStatus.dataset.active = String(runtime.streak > 0);
-  elements.syncStatus.dataset.recovery = recoveryArmed
-    ? "armed"
-    : runtime.syncRecoveryUsed ? "used" : "idle";
-  elements.syncStatus.setAttribute(
-    "aria-label",
-    recoveryArmed
-      ? `연속 정답 ${runtime.streak}, 현재 연속 보너스 ${syncBonus}. ${recoveryRemaining}연속 정답을 더 하면 이전 오류 하나를 복구합니다.`
-      : runtime.syncRecoveryUsed
-        ? `연속 정답 ${runtime.streak}, 현재 연속 보너스 ${syncBonus}. SYNC RECOVERY 사용 완료.`
-        : `연속 정답 ${runtime.streak}, 현재 연속 보너스 ${syncBonus}. 오류 뒤 ${SYNC_RECOVERY_STREAK}연속 정답으로 한 번 복구할 수 있습니다.`,
-  );
-  updateAuditProgress();
-  updateLensStatus();
-  updateDeepVerifyStatus();
-  updateDirectiveReadout();
-}
-
-function updateAuditProgress() {
-  const answered = runtime.outcomes.filter(Boolean).length;
-  const gate = getAuditGateStatus({
-    correct: runtime.correct,
-    answered,
-    integrity: runtime.integrity,
-    required: VERIFIED_CORRECT_REQUIRED,
-  });
-  elements.auditProgress.dataset.state = gate.state;
-  elements.auditGateValue.textContent = gate.label;
-  elements.auditReward.textContent = runtime.memory.fragments >= MAX_MEMORY_FRAGMENTS
-    ? "ARCHIVE COMPLETE"
-    : `NEXT MORI.LOG/${String(runtime.memory.fragments + 1).padStart(2, "0")}`;
-
-  const statusLabels = {
-    correct: "검증 성공",
-    recovered: "SYNC 복구",
-    wrong: "검증 실패",
-    timeout: "시간 초과",
-    current: "현재 라운드",
-    pending: "대기",
-  };
-  const statusMarks = {
-    correct: "✓",
-    recovered: "↺",
-    wrong: "×",
-    timeout: "×",
-    current: "◆",
-    pending: "·",
-  };
-
-  elements.auditProgress.querySelectorAll("li").forEach((item, index) => {
-    const outcome = runtime.outcomes[index];
-    const isCurrent = runtime.mode === "play"
-      && !runtime.locked
-      && index === runtime.roundIndex;
-    const state = outcome || (isCurrent ? "current" : "pending");
-    item.dataset.state = state;
-    item.querySelector("strong").textContent = statusMarks[state];
-    item.setAttribute("aria-label", `웨이브 ${index + 1}, ${statusLabels[state]}`);
-    if (isCurrent) item.setAttribute("aria-current", "step");
-    else item.removeAttribute("aria-current");
-  });
-}
-
-function updateDirectiveReadout() {
-  const status = getActiveDirectiveStatus();
-  if (!status) return;
-  const progress = getDirectiveProgressLabel(status);
-  elements.directiveReadout.dataset.state = status.completed ? "complete" : "active";
-  elements.directiveReadout.textContent = `MORI REQUEST · ${status.code} · ${progress} · +${status.bonus}`;
-  elements.directiveReadout.setAttribute(
-    "aria-label",
-    `MORI REQUEST ${status.label}. 진행 ${progress}. 완료 보너스 ${status.bonus}점.`,
-  );
-}
-
-function clearSessionCard() {
-  elements.triageLane.replaceChildren();
-}
-
-function renderEmptyTriageLane() {
-  const empty = document.createElement("p");
-  empty.className = "triage-lane-empty";
-  empty.textContent = "켜진 터미널로 이동하세요.";
-  elements.triageLane.replaceChildren(empty);
-}
-
-function renderSessionCard(session) {
-  clearSessionCard();
-  const card = document.createElement("div");
-  card.className = "session-card";
-  card.style.setProperty("--session-progress", "0");
-
-  const resolvedCount = runtime.waveCorrect + runtime.waveWrong + runtime.waveMissed;
-  const kicker = document.createElement("p");
-  kicker.className = "session-card-kicker";
-  kicker.textContent = `세션 ${String(resolvedCount + 1).padStart(2, "0")} / ${String(runtime.waveConfig.target).padStart(2, "0")}`;
-
-  const header = document.createElement("div");
-  header.className = "claim-row claim-header";
-  const headerLeft = document.createElement("span");
-  headerLeft.textContent = "MORI의 기록";
-  const headerRight = document.createElement("span");
-  headerRight.textContent = "이 세션의 주장";
-  header.append(headerLeft, headerRight);
-
-  const list = document.createElement("ul");
-  list.className = "claim-list";
-  list.setAttribute("aria-label", "MORI의 기록과 이 세션의 주장 비교");
-  session.parts.forEach((part) => {
-    const item = document.createElement("li");
-    item.className = "claim-line";
-    const trusted = document.createElement("span");
-    trusted.className = "claim-trusted";
-    trusted.textContent = part.trustedText;
-    const claim = document.createElement("span");
-    claim.className = "claim-own";
-    claim.textContent = part.text;
-    item.append(trusted, claim);
-    list.append(item);
-  });
-
-  card.append(kicker, header, list);
-  elements.triageLane.append(card);
-}
-
-function spawnZonePop(zoneKey, text, positive) {
-  const zoneEl = {
-    true: elements.zoneTrue,
-    false: elements.zoneFalse,
-    corrupted: elements.zoneCorrupted,
-  }[zoneKey];
-  if (!zoneEl) return;
+function spawnSignalPop(slotEl, text, positive) {
   const pop = document.createElement("span");
   pop.className = `zone-score-pop ${positive ? "is-positive" : "is-negative"}`;
   pop.textContent = text;
-  zoneEl.append(pop);
+  slotEl.append(pop);
   window.setTimeout(() => pop.remove(), 900);
 }
 
-function pulseMoriState(state, dialogueOverride = "") {
-  window.clearTimeout(runtime.moriPulseTimer);
-  setMoriState(state, dialogueOverride);
-  runtime.moriPulseTimer = window.setTimeout(() => {
-    if (runtime.mode !== "play" || runtime.locked) return;
-    const finalCore = runtime.roundIndex === TOTAL_ROUNDS - 1;
-    if (finalCore) setMoriState("core-final");
-    else setMoriState("observing", WAVE_MORI_DIALOGUE[runtime.roundIndex]);
-  }, 900);
+function spawnRandomSignal(timestamp, elapsedMs) {
+  const idleSlots = runtime.slots.filter((slot) => slot.state === "idle");
+  if (!idleSlots.length) return;
+  const slot = idleSlots[Math.floor(Math.random() * idleSlots.length)];
+  const kind = pickSignalKind();
+  const lensBoost = timestamp < runtime.lensBoostUntil;
+  const lifespan = getSignalLifespanMs(elapsedMs) * (lensBoost ? 1.6 : 1);
+
+  slot.kind = kind;
+  slot.state = kind;
+  slot.totalMs = lifespan;
+  slot.deadline = timestamp + lifespan;
+  updateSlotVisual(slot);
+  if (kind === "fake") audio.warning();
 }
 
-function updateWaveProgress() {
-  if (!runtime.waveConfig) return;
-  elements.waveProgress.textContent =
-    `정답 ${runtime.waveCorrect} / ${runtime.waveConfig.target} · 오답 ${runtime.waveWrong} · 놓침 ${runtime.waveMissed}`;
-  elements.waveProgress.setAttribute(
-    "aria-label",
-    `이번 웨이브 진행. 정답 ${runtime.waveCorrect}/${runtime.waveConfig.target}, 오답 ${runtime.waveWrong}, 놓침 ${runtime.waveMissed}.`,
-  );
+function settleSlot(slot, outcome, settleDelayMs) {
+  slot.state = outcome;
+  slot.kind = null;
+  updateSlotVisual(slot);
+  window.setTimeout(() => {
+    if (slot.state !== outcome) return;
+    slot.state = "idle";
+    updateSlotVisual(slot);
+  }, settleDelayMs);
 }
 
-function mistakeTypeFor(sessionZone, judgedZone) {
-  if (sessionZone === "false" && judgedZone === "true") return "approved-spoofed";
-  if (sessionZone === "true" && judgedZone === "false") return "rejected-genuine";
-  return "misjudged-corrupted";
-}
-
-function judgeSession(zone) {
+function activateSlot(index) {
   if (runtime.mode !== "play" || runtime.locked) return;
-  const terminal = runtime.terminals[runtime.dockedIndex];
-  const session = runtime.currentSession;
-  if (!terminal || !session) return;
+  const slot = runtime.slots[index];
+  if (!slot || (slot.state !== "fake" && slot.state !== "genuine")) return;
 
-  const deepVerify = runtime.deepVerifyArmed;
-  runtime.deepVerifyArmed = false;
-  if (deepVerify) runtime.deepVerifyUsedWaveIndex = runtime.roundIndex;
+  const timestamp = performance.now();
+  const settleDelay = reducedMotionQuery.matches ? 120 : 320;
+  const deepVerifyActive = timestamp < runtime.deepVerifyUntil;
 
-  const correct = zone === session.zone;
-  const remainingRatio = clamp01(Math.max(0, terminal.deadline - performance.now()) / terminal.totalMs);
-
-  if (correct) {
-    runtime.streak += 1;
-    runtime.maxStreak = Math.max(runtime.maxStreak, runtime.streak);
-    runtime.waveCorrect += 1;
-    if (deepVerify) runtime.deepVerifyWins += 1;
-    const points = scoreCorrectAnswer(remainingRatio, runtime.streak, deepVerify, runtime.deepVerifyBonus);
+  if (slot.kind === "fake") {
+    runtime.combo += 1;
+    runtime.maxCombo = Math.max(runtime.maxCombo, runtime.combo);
+    runtime.purges += 1;
+    if (deepVerifyActive) runtime.deepVerifyPurges += 1;
+    const remainingRatio = clamp01((slot.deadline - timestamp) / slot.totalMs);
+    const points = scorePurge(remainingRatio, runtime.combo, deepVerifyActive ? 2 : 1);
     runtime.score += points;
-    spawnZonePop(zone, `+${points}`, true);
-    audio.correct(runtime.streak);
-    pulseMoriState(runtime.streak >= 2 ? "sync-linked" : "answer-correct");
-    updateScoreAndIntegrity();
-    updateWaveProgress();
-    announce(`${ZONE_LABELS[zone]} 판정이 정확했습니다. ${points}점 획득. 연속 ${runtime.streak}.`);
+    spawnSignalPop(slot.el, `+${points}`, true);
+    audio.correct(runtime.combo);
+    pulseMoriState(runtime.combo >= 4 ? "sync-linked" : "answer-correct");
+    settleSlot(slot, "hit", settleDelay);
   } else {
-    runtime.streak = 0;
-    runtime.waveWrong += 1;
-    runtime.wrongCount += 1;
-    const integrityLoss = getWrongJudgmentLoss(mistakeTypeFor(session.zone, zone), deepVerify);
-    runtime.integrity = Math.max(0, runtime.integrity - integrityLoss);
-    spawnZonePop(zone, `-${integrityLoss}`, false);
+    runtime.combo = 0;
+    runtime.wrongClicks += 1;
+    const loss = getWrongClickLoss(deepVerifyActive);
+    runtime.integrity = Math.max(0, runtime.integrity - loss);
+    spawnSignalPop(slot.el, `-${loss}`, false);
     audio.wrong();
-    pulseMoriState("answer-wrong", WRONG_ZONE_HINT[session.zone]);
-    updateScoreAndIntegrity();
-    updateWaveProgress();
-    announce(`${ZONE_LABELS[zone]} 판정은 오답입니다. 기억 무결성 ${integrityLoss}칸 손실.`);
+    pulseMoriState("answer-wrong");
+    settleSlot(slot, "wrong", settleDelay);
+    announce(`오클릭. 진짜 신호를 정화했습니다. 코어 무결성 ${loss}칸 손실.`);
   }
 
-  runtime.dockedIndex = -1;
-  runtime.currentSession = null;
-  renderEmptyTriageLane();
-  settleTerminal(terminal, correct ? "correct" : "wrong");
-}
-
-function updateTerminalVisual(terminal) {
-  terminal.el.dataset.state = terminal.state;
-}
-
-function spawnNextTerminal(terminalIndex) {
-  const terminal = runtime.terminals[terminalIndex];
-  if (!terminal || terminal.state !== "idle") return;
-  const session = runtime.spawnQueue.shift();
-  if (!session) return;
-  terminal.session = session;
-  terminal.state = "pending";
-  terminal.totalMs = runtime.waveConfig.timerMs;
-  terminal.deadline = performance.now() + terminal.totalMs;
-  updateTerminalVisual(terminal);
-  audio.warning();
-  announce(`터미널 ${terminal.index + 1}번이 켜졌습니다. 이동해서 도착하면 세션을 판정할 수 있습니다.`);
-}
-
-function checkWaveCompletion() {
-  if (runtime.mode !== "play" || runtime.locked) return;
-  const queueEmpty = runtime.spawnQueue.length === 0;
-  const allIdle = runtime.terminals.every((terminal) => terminal.state === "idle");
-  if (queueEmpty && allIdle) {
-    concludeWave("correct");
-  }
-}
-
-function settleTerminal(terminal, outcome) {
-  terminal.session = null;
-  terminal.state = outcome === "correct"
-    ? "resolved-correct"
-    : outcome === "wrong" ? "resolved-wrong" : "idle";
-  updateTerminalVisual(terminal);
-
+  updateHud();
   if (runtime.integrity <= 0) {
-    concludeWave("wrong");
+    finishRun();
+  }
+}
+
+function useArchiveLens() {
+  if (runtime.mode !== "play" || runtime.locked) return;
+  if (runtime.lensCharges <= 0) {
+    showToast("이번 런의 ARCHIVE LENS 충전을 모두 사용했습니다.");
     return;
   }
 
-  const settleDelay = reducedMotionQuery.matches ? 120 : 380;
-  window.setTimeout(() => {
-    if (runtime.mode !== "play") return;
-    terminal.state = "idle";
-    updateTerminalVisual(terminal);
-    spawnNextTerminal(terminal.index);
-    checkWaveCompletion();
-  }, settleDelay);
-}
-
-function handleTerminalTimeout(terminal) {
-  runtime.streak = 0;
-  runtime.waveMissed += 1;
-  runtime.missedCount += 1;
-  updateScoreAndIntegrity();
-  updateWaveProgress();
-  if (runtime.dockedIndex === terminal.index) {
-    runtime.dockedIndex = -1;
-    runtime.currentSession = null;
-    renderEmptyTriageLane();
-  }
-  settleTerminal(terminal, "timeout");
-}
-
-function dockTerminal(index) {
-  if (runtime.dockedIndex === index) return;
-  undockTerminal();
-  const terminal = runtime.terminals[index];
-  terminal.state = "active";
-  updateTerminalVisual(terminal);
-  runtime.dockedIndex = index;
-  runtime.moveTargetIndex = -1;
-  runtime.currentSession = terminal.session;
-  renderSessionCard(terminal.session);
-  announce("세션 카드가 열렸습니다. 진짜, 가짜, 손상 중 하나로 판정하세요.");
-}
-
-function undockTerminal() {
-  if (runtime.dockedIndex < 0) return;
-  const terminal = runtime.terminals[runtime.dockedIndex];
-  if (terminal && terminal.state === "active") {
-    terminal.state = "pending";
-    updateTerminalVisual(terminal);
-  }
-  runtime.dockedIndex = -1;
-  runtime.currentSession = null;
-  renderEmptyTriageLane();
-}
-
-function updateDocking(roomRect) {
-  let nearestIndex = -1;
-  let nearestDist = DOCK_RADIUS;
-  runtime.terminals.forEach((terminal) => {
-    if (terminal.state !== "pending" && terminal.state !== "active") return;
-    const pos = getTerminalPixelPos(terminal, roomRect);
-    const dist = Math.hypot(pos.x - runtime.avatar.x, pos.y - runtime.avatar.y);
-    if (dist <= nearestDist) {
-      nearestDist = dist;
-      nearestIndex = terminal.index;
+  runtime.lensCharges -= 1;
+  runtime.lensUses += 1;
+  const timestamp = performance.now();
+  runtime.lensBoostUntil = timestamp + LENS_BOOST_MS;
+  runtime.slots.forEach((slot) => {
+    if (slot.state === "fake" || slot.state === "genuine") {
+      slot.deadline += LENS_EXTEND_BONUS_MS;
+      slot.totalMs += LENS_EXTEND_BONUS_MS;
     }
   });
 
-  if (nearestIndex >= 0 && nearestIndex !== runtime.dockedIndex) {
-    dockTerminal(nearestIndex);
-  } else if (nearestIndex < 0 && runtime.dockedIndex >= 0) {
-    undockTerminal();
-  }
+  setMoriState("lens-used");
+  showToast(`ARCHIVE LENS 사용 — ${(LENS_BOOST_MS / 1_000).toFixed(0)}초 동안 신호가 느리게 사라집니다.`);
+  updateHud();
+  audio.navigate(runtime.lensCharges);
+  announce(`ARCHIVE LENS를 사용했습니다. 남은 충전 ${runtime.lensCharges}회.`);
 }
 
-function updateAvatarPosition(dt, roomRect) {
-  const left = runtime.keysDown.has("ArrowLeft");
-  const right = runtime.keysDown.has("ArrowRight");
-  const up = runtime.keysDown.has("ArrowUp");
-  const down = runtime.keysDown.has("ArrowDown");
-  let dirX = (right ? 1 : 0) - (left ? 1 : 0);
-  let dirY = (down ? 1 : 0) - (up ? 1 : 0);
-  const manualInput = dirX !== 0 || dirY !== 0;
-
-  if (manualInput) {
-    runtime.moveTargetIndex = -1;
-    const length = Math.hypot(dirX, dirY) || 1;
-    dirX /= length;
-    dirY /= length;
-    runtime.avatar.vx += dirX * AVATAR_ACCEL * dt;
-    runtime.avatar.vy += dirY * AVATAR_ACCEL * dt;
-  } else if (runtime.moveTargetIndex >= 0 && runtime.terminals[runtime.moveTargetIndex]) {
-    const terminal = runtime.terminals[runtime.moveTargetIndex];
-    if (terminal.state !== "pending" && terminal.state !== "active") {
-      runtime.moveTargetIndex = -1;
-    } else {
-      const pos = getTerminalPixelPos(terminal, roomRect);
-      const dx = pos.x - runtime.avatar.x;
-      const dy = pos.y - runtime.avatar.y;
-      const dist = Math.hypot(dx, dy);
-      if (dist < 6) {
-        runtime.moveTargetIndex = -1;
-      } else {
-        runtime.avatar.vx += (dx / dist) * AVATAR_ACCEL * dt;
-        runtime.avatar.vy += (dy / dist) * AVATAR_ACCEL * dt;
-      }
-    }
-  } else {
-    const speed = Math.hypot(runtime.avatar.vx, runtime.avatar.vy);
-    if (speed > 0) {
-      const drop = Math.min(speed, AVATAR_FRICTION * dt);
-      const scale = (speed - drop) / speed;
-      runtime.avatar.vx *= scale;
-      runtime.avatar.vy *= scale;
-    }
+function toggleDeepVerifyWager() {
+  if (runtime.mode !== "play" || runtime.locked) return;
+  if (runtime.deepVerifyUsed) {
+    showToast("DEEP VERIFY는 이번 런에서 이미 사용했습니다.");
+    return;
   }
 
-  const speed = Math.hypot(runtime.avatar.vx, runtime.avatar.vy);
-  if (speed > AVATAR_MAX_SPEED) {
-    const scale = AVATAR_MAX_SPEED / speed;
-    runtime.avatar.vx *= scale;
-    runtime.avatar.vy *= scale;
-  }
-
-  runtime.avatar.x = clamp(
-    runtime.avatar.x + runtime.avatar.vx * dt,
-    AVATAR_MARGIN,
-    Math.max(AVATAR_MARGIN, roomRect.width - AVATAR_MARGIN),
-  );
-  runtime.avatar.y = clamp(
-    runtime.avatar.y + runtime.avatar.vy * dt,
-    AVATAR_MARGIN,
-    Math.max(AVATAR_MARGIN, roomRect.height - AVATAR_MARGIN),
-  );
-
-  elements.operatorAvatar.style.left = `${runtime.avatar.x}px`;
-  elements.operatorAvatar.style.top = `${runtime.avatar.y}px`;
+  runtime.deepVerifyUsed = true;
+  runtime.deepVerifyUntil = performance.now() + DEEP_VERIFY_WINDOW_MS;
+  setMoriState("deep-verify");
+  audio.navigate(2);
+  updateHud();
+  announce(`DEEP VERIFY를 켰습니다. ${(DEEP_VERIFY_WINDOW_MS / 1_000).toFixed(0)}초 동안 정화 점수가 2배, 오클릭 손실도 2배입니다.`);
 }
 
-function updateTerminalTimers(timestamp) {
-  let soonestRemaining = Infinity;
-  let soonestTotal = 1;
-  let dockedRatioPercent = null;
-
-  runtime.terminals.forEach((terminal) => {
-    if (terminal.state !== "pending" && terminal.state !== "active") return;
-    const remaining = Math.max(0, terminal.deadline - timestamp);
-    const ratioPercent = terminal.totalMs > 0 ? (remaining / terminal.totalMs) * 100 : 0;
-    terminal.ring.style.setProperty("--time-left", String(ratioPercent));
-    if (terminal.state === "pending") {
-      terminal.el.dataset.urgent = String(ratioPercent < 30);
-    }
-
-    if (remaining < soonestRemaining) {
-      soonestRemaining = remaining;
-      soonestTotal = terminal.totalMs;
-    }
-    if (terminal.index === runtime.dockedIndex) {
-      dockedRatioPercent = ratioPercent;
-    }
-    if (remaining <= 0) {
-      handleTerminalTimeout(terminal);
-    }
-  });
-
-  if (dockedRatioPercent !== null) {
-    const card = elements.triageLane.querySelector(".session-card");
-    if (card) card.style.setProperty("--session-progress", String(100 - dockedRatioPercent));
-  }
-
-  if (Number.isFinite(soonestRemaining)) {
-    renderTimeHud(soonestRemaining, soonestTotal);
-  } else {
-    elements.roundTime.textContent = "--.-";
-    elements.screenStack.dataset.timePressure = "false";
-    runtime.clockTenths = -1;
-  }
-}
-
-function roomLoop(timestamp) {
+function gameLoop(timestamp) {
   if (runtime.mode !== "play") {
     runtime.animationFrame = 0;
     return;
   }
 
-  const last = runtime.lastFrameAt || timestamp;
-  const dt = Math.min(0.05, Math.max(0, (timestamp - last) / 1_000));
-  runtime.lastFrameAt = timestamp;
-
   if (!runtime.locked) {
-    const roomRect = getRoomRect();
-    updateAvatarPosition(dt, roomRect);
-    updateTerminalTimers(timestamp);
-    updateDocking(roomRect);
+    const elapsedMs = clamp(timestamp - runtime.runStartAt, 0, RUN_DURATION_MS);
+    const remainingMs = RUN_DURATION_MS - elapsedMs;
+
+    runtime.slots.forEach((slot) => {
+      if (slot.state !== "fake" && slot.state !== "genuine") return;
+      const remaining = Math.max(0, slot.deadline - timestamp);
+      const ratioPercent = slot.totalMs > 0 ? (remaining / slot.totalMs) * 100 : 0;
+      slot.ring.style.setProperty("--time-left", String(ratioPercent));
+
+      if (remaining <= 0) {
+        if (slot.kind === "fake") {
+          runtime.combo = 0;
+          runtime.missedFakes += 1;
+          settleSlot(slot, "missed", reducedMotionQuery.matches ? 120 : 260);
+        } else {
+          settleSlot(slot, "idle", 0);
+        }
+        updateHud();
+      }
+    });
+
+    if (
+      timestamp >= runtime.nextSpawnAt
+      && runtime.slots.filter((slot) => slot.state === "fake" || slot.state === "genuine").length
+        < getMaxConcurrentSignals(elapsedMs)
+    ) {
+      spawnRandomSignal(timestamp, elapsedMs);
+      runtime.nextSpawnAt = timestamp + getSpawnIntervalMs(elapsedMs);
+    }
+
+    if (runtime.deepVerifyUntil > 0) updateDeepVerifyStatus();
+    if (runtime.lensBoostUntil > 0) updateLensStatus();
+    renderTimeHud(remainingMs);
+
+    if (elapsedMs >= RUN_DURATION_MS) {
+      finishRun();
+      return;
+    }
   }
 
-  runtime.animationFrame = window.requestAnimationFrame(roomLoop);
-}
-
-function startWaveRoom() {
-  runtime.spawnQueue = [...runtime.waveSessions];
-  runtime.dockedIndex = -1;
-  runtime.moveTargetIndex = -1;
-  runtime.currentSession = null;
-  renderEmptyTriageLane();
-
-  const roomRect = getRoomRect();
-  if (runtime.roundIndex === 0) {
-    runtime.avatar.x = roomRect.width / 2;
-    runtime.avatar.y = roomRect.height / 2;
-    runtime.avatar.vx = 0;
-    runtime.avatar.vy = 0;
-    elements.operatorAvatar.style.left = `${runtime.avatar.x}px`;
-    elements.operatorAvatar.style.top = `${runtime.avatar.y}px`;
-  }
-
-  runtime.terminals.forEach((terminal) => {
-    terminal.state = "idle";
-    terminal.session = null;
-    updateTerminalVisual(terminal);
-  });
-
-  const concurrent = Math.min(
-    runtime.waveConfig.concurrent,
-    runtime.terminals.length,
-    runtime.spawnQueue.length,
-  );
-  for (let index = 0; index < concurrent; index += 1) {
-    spawnNextTerminal(index);
-  }
-
-  runtime.lastFrameAt = 0;
-  window.cancelAnimationFrame(runtime.animationFrame);
-  runtime.animationFrame = window.requestAnimationFrame(roomLoop);
-}
-
-function useArchiveLens() {
-  if (runtime.mode !== "play" || runtime.locked) return;
-  if (runtime.lensUsedRoundIndex === runtime.roundIndex) {
-    showToast("ARCHIVE LENS는 웨이브마다 한 번만 조준할 수 있습니다.");
-    return;
-  }
-  if (runtime.lensCharges <= 0) {
-    showToast("이번 런의 ARCHIVE LENS 충전을 모두 사용했습니다.");
-    return;
-  }
-  const session = runtime.currentSession;
-  if (!session) {
-    showToast("지금 심사할 세션이 없습니다.");
-    return;
-  }
-
-  runtime.lensCharges -= 1;
-  runtime.lensUsedRoundIndex = runtime.roundIndex;
-  const card = elements.triageLane.querySelector(".session-card");
-  if (card) {
-    card.classList.add("is-lens-revealed");
-    card.dataset.revealZone = session.zone;
-  }
-
-  elements.roundFeedback.textContent = `ARCHIVE LENS · 이 세션의 실제 판정(${ZONE_LABELS[session.zone]})을 밝혔습니다.`;
-  elements.roundFeedback.className = "round-feedback is-lens";
-  setMoriState("lens-used");
-  showRoundImpact(
-    "lens",
-    "ARCHIVE LENS",
-    ZONE_LABELS[session.zone],
-    `${runtime.lensCharges} CHARGE${runtime.lensCharges === 1 ? "" : "S"} REMAIN`,
-    reducedMotionQuery.matches ? 450 : 900,
-  );
-  updateScoreAndIntegrity();
-  audio.navigate(runtime.lensCharges);
-  announce(`ARCHIVE LENS를 사용했습니다. 이 세션의 실제 판정을 밝혔습니다. 남은 충전 ${runtime.lensCharges}회.`);
-}
-
-function toggleDeepVerifyWager() {
-  if (runtime.mode !== "play" || runtime.locked) return;
-  if (runtime.deepVerifyUsedWaveIndex === runtime.roundIndex) {
-    showToast("DEEP VERIFY는 웨이브마다 한 번만 사용할 수 있습니다.");
-    return;
-  }
-  if (!runtime.deepVerifyArmed && runtime.integrity <= 1) {
-    showToast("DEEP VERIFY는 기억 무결성이 2칸 이상일 때만 켤 수 있습니다.");
-    announce("DEEP VERIFY를 사용할 수 없습니다. 기억 무결성이 1칸 남았습니다.");
-    return;
-  }
-
-  runtime.deepVerifyArmed = !runtime.deepVerifyArmed;
-  updateDeepVerifyStatus();
-  if (runtime.deepVerifyArmed) {
-    elements.roundFeedback.textContent =
-      `DEEP VERIFY ON · 이번 판정 정답 +${runtime.deepVerifyBonus} / 오답 무결성 -2`;
-    elements.roundFeedback.className = "round-feedback is-wager";
-    setMoriState("deep-verify");
-    audio.navigate(2);
-    announce(`DEEP VERIFY를 켰습니다. 이번 판정에서 정답이면 ${runtime.deepVerifyBonus}점을 더 받고, 실패하면 기억 무결성을 2칸 잃습니다.`);
-  } else {
-    setMoriState("observing", WAVE_MORI_DIALOGUE[runtime.roundIndex]);
-    announce("DEEP VERIFY를 껐습니다.");
-  }
-}
-
-function startWave() {
-  cancelRoundTimers();
-  if (runtime.integrity <= 0 || runtime.roundIndex >= TOTAL_ROUNDS) {
-    finishGame();
-    return;
-  }
-
-  const waveNumber = String(runtime.roundIndex + 1).padStart(2, "0");
-  const finalCore = runtime.roundIndex === TOTAL_ROUNDS - 1;
-  runtime.locked = false;
-  runtime.waveConfig = getWaveConfig(runtime.roundIndex);
-  runtime.waveSessions = createSessionClaims(runtime.catalog, runtime.roundIndex, runtime.seed);
-  runtime.waveCorrect = 0;
-  runtime.waveWrong = 0;
-  runtime.waveMissed = 0;
-  runtime.deepVerifyArmed = false;
-  runtime.deepVerifyBonus = getDeepVerifyBonus(runtime.roundIndex);
-  elements.screenStack.dataset.timePressure = "false";
-  elements.screenStack.dataset.finalRound = String(finalCore);
-
-  elements.roundKicker.textContent = finalCore
-    ? `FINAL CORE / SESSION AUDIT · ${waveNumber}/${String(TOTAL_ROUNDS).padStart(2, "0")}`
-    : `SESSION AUDIT · WAVE ${waveNumber}/${String(TOTAL_ROUNDS).padStart(2, "0")}`;
-  elements.roundHeading.textContent = PLAY_INSTRUCTION.prompt;
-  elements.boardInstruction.textContent = PLAY_INSTRUCTION.instruction;
-  elements.roundFeedback.textContent = "";
-  elements.roundFeedback.className = "round-feedback";
-  resetRoundImpact();
-  updateWaveProgress();
-  document.title = finalCore
-    ? "[FINAL CORE] STATE//LESS"
-    : `[${runtime.roundIndex + 1}/${TOTAL_ROUNDS}] STATE//LESS`;
-  updateMemoryRoute(finalCore ? "audit/final-core" : `audit/wave-${waveNumber}`);
-  if (finalCore) setMoriState("core-final");
-  else setMoriState("observing", WAVE_MORI_DIALOGUE[runtime.roundIndex]);
-
-  updateScoreAndIntegrity();
-  if (finalCore) {
-    audio.core();
-    announce(`마지막 코어 웨이브. ${PLAY_INSTRUCTION.instruction} DEEP VERIFY 정답 보너스가 ${runtime.deepVerifyBonus}점으로 상승했습니다.`);
-  } else {
-    announce(`${runtime.roundIndex + 1}번째 웨이브 시작. ${PLAY_INSTRUCTION.instruction}`);
-  }
-  if (runtime.roundIndex === 0 && runtime.memory.runs === 0) {
-    showToast("방향키로 이동해 깜빡이는 터미널에 도착하세요. 여러 개가 동시에 켜지면 급한 쪽부터.");
-  }
-  startWaveRoom();
-}
-
-function concludeWave(outcome) {
-  if (runtime.mode !== "play" || runtime.locked) return;
-  runtime.locked = true;
-  window.clearTimeout(runtime.moriPulseTimer);
-  window.cancelAnimationFrame(runtime.animationFrame);
-
-  const finalCore = runtime.roundIndex === TOTAL_ROUNDS - 1;
-  const correct = outcome === "correct";
-  runtime.outcomes[runtime.roundIndex] = outcome;
-  if (correct) runtime.correct += 1;
-
-  const recoveredRoundIndex = correct
-    ? getSyncRecoveryIndex({
-      outcomes: runtime.outcomes,
-      streak: runtime.streak,
-      used: runtime.syncRecoveryUsed,
-    })
-    : -1;
-  const recoveredRoundNumber = recoveredRoundIndex >= 0
-    ? String(recoveredRoundIndex + 1).padStart(2, "0")
-    : "";
-  if (recoveredRoundIndex >= 0) {
-    runtime.outcomes[recoveredRoundIndex] = "recovered";
-    runtime.correct += 1;
-    runtime.integrity = Math.min(MAX_INTEGRITY, runtime.integrity + 1);
-    runtime.syncRecoveryUsed = true;
-  }
-
-  const directiveBonus = correct ? awardRunDirectiveBonus() : 0;
-  if (directiveBonus) runtime.score += directiveBonus;
-
-  updateScoreAndIntegrity();
-
-  if (correct) {
-    audio.correct(runtime.streak);
-    setMoriState(recoveredRoundIndex >= 0
-      ? "sync-recovery"
-      : directiveBonus > 0
-        ? "directive-complete"
-        : finalCore ? "core-final" : "answer-correct");
-    const recoveryNotice = recoveredRoundIndex >= 0
-      ? ` · SYNC RECOVERY로 웨이브 ${recoveredRoundNumber} 복구`
-      : "";
-    const directiveNotice = directiveBonus ? ` · MORI REQUEST +${directiveBonus}` : "";
-    elements.roundFeedback.textContent =
-      `${finalCore ? "FINAL CORE · " : ""}웨이브 클리어 · 정답 ${runtime.waveCorrect}개${directiveNotice}${recoveryNotice}`;
-    elements.roundFeedback.className = "round-feedback is-positive";
-    showRoundImpact(
-      "correct",
-      recoveredRoundIndex >= 0
-        ? "SYNC RECOVERY"
-        : finalCore
-          ? "CORE SEALED"
-          : directiveBonus > 0 ? "REQUEST SEALED" : "WAVE CLEARED",
-      `+${directiveBonus || runtime.waveCorrect}`,
-      `CHAIN ×${runtime.maxStreak} · WRONG ${runtime.waveWrong} · MISS ${runtime.waveMissed}`,
-    );
-    announce(`웨이브 ${runtime.roundIndex + 1} 클리어. 정답 ${runtime.waveCorrect}개.${directiveBonus ? ` MORI REQUEST 완료 +${directiveBonus}점.` : ""}`);
-  } else {
-    runtime.streak = 0;
-    audio.wrong();
-    setMoriState(
-      "answer-wrong",
-      finalCore ? "마지막 코어를 봉인하지 못했어. 그래도 결과를 보기 전까지는 놓지 마." : "",
-    );
-    elements.roundFeedback.textContent =
-      `${finalCore ? "FINAL CORE · " : ""}웨이브 실패 · 정답 ${runtime.waveCorrect}/${runtime.waveConfig.target}`;
-    elements.roundFeedback.className = "round-feedback is-negative";
-    showRoundImpact(
-      "wrong",
-      finalCore ? "CORE FRACTURE" : "INDEX HURT",
-      `${runtime.waveCorrect}/${runtime.waveConfig.target}`,
-      "INTEGRITY DEPLETED",
-    );
-    announce(`웨이브 ${runtime.roundIndex + 1}을 완료하지 못했습니다. 정답 ${runtime.waveCorrect}/${runtime.waveConfig.target}.`);
-  }
-
-  const auditFinished = runtime.integrity <= 0 || runtime.roundIndex >= TOTAL_ROUNDS - 1;
-  elements.roundContinueLabel.textContent = auditFinished ? "VIEW RESULT" : "NEXT WAVE";
-  elements.roundContinueButton.hidden = false;
-  if (runtime.inputMode === "keyboard") {
-    elements.roundContinueButton.focus({ preventScroll: true });
-  }
-  runtime.advanceTimer = window.setTimeout(
-    advanceRound,
-    reducedMotionQuery.matches ? 700 : 2_200,
-  );
+  runtime.animationFrame = window.requestAnimationFrame(gameLoop);
 }
 
 function renderResultArchive(foundNewFragment) {
@@ -1554,34 +880,38 @@ function renderResultArchive(foundNewFragment) {
   elements.resultRecordCode.textContent = `MORI.LOG/${String(nextFragment).padStart(2, "0")}`;
   elements.resultRecordStatus.textContent = "NO REWARD";
   elements.resultRecordTitle.textContent = "다음 기록은 아직 잠겨 있습니다.";
-  elements.resultRecordBody.textContent = "여섯 번 중 다섯 번 이상 성공해 VERIFIED 결말에 도달하면 이 파일이 열립니다.";
+  elements.resultRecordBody.textContent = "A랭크 이상으로 VERIFIED 결말에 도달하면 이 파일이 열립니다.";
   return null;
 }
 
-async function finishGame() {
-  cancelRoundTimers();
+async function finishRun() {
+  cancelRunTimers();
+  runtime.locked = true;
   runtime.mode = "result";
+
   const provisionalResult = getResult({
     score: runtime.score,
-    correct: runtime.correct,
+    purges: runtime.purges,
+    wrongClicks: runtime.wrongClicks,
+    missedFakes: runtime.missedFakes,
     integrity: runtime.integrity,
-    recoveryUsed: runtime.syncRecoveryUsed,
   });
-  const finalDirectiveBonus = awardRunDirectiveBonus(provisionalResult.ending);
-  runtime.score += finalDirectiveBonus;
+  const directiveBonus = awardRunDirectiveBonus(provisionalResult.ending);
+  runtime.score += directiveBonus;
   runtime.lastResult = getResult({
     score: runtime.score,
-    correct: runtime.correct,
+    purges: runtime.purges,
+    wrongClicks: runtime.wrongClicks,
+    missedFakes: runtime.missedFakes,
     integrity: runtime.integrity,
-    recoveryUsed: runtime.syncRecoveryUsed,
   });
 
   const result = runtime.lastResult;
   const styleTag = getRunStyleTag({
-    deepVerifyWins: runtime.deepVerifyWins,
-    syncRecoveryUsed: runtime.syncRecoveryUsed,
-    wrongCount: runtime.wrongCount,
-    maxStreak: runtime.maxStreak,
+    deepVerifyPurges: runtime.deepVerifyPurges,
+    wrongClicks: runtime.wrongClicks,
+    maxCombo: runtime.maxCombo,
+    lensUses: runtime.lensUses,
   });
   const styleRemark = getRunStyleRemark(styleTag);
   renderResultDirective(result.ending);
@@ -1589,26 +919,24 @@ async function finishGame() {
   const foundNewFragment = runtime.pendingFragments > runtime.memory.fragments;
   const recoveredRecord = renderResultArchive(foundNewFragment);
   const completedNow = Boolean(foundNewFragment && recoveredRecord?.final);
-  const recoverySummary = runtime.syncRecoveryUsed
-    ? " SYNC RECOVERY로 이전 오류 하나를 복구했습니다."
-    : "";
+
   elements.resultKicker.textContent = completedNow
     ? "ARCHIVE COMPLETE"
-    : result.ending === "verified" ? "AUDIT COMPLETE" : "AUDIT INTERRUPTED";
+    : result.ending === "verified" ? "RUN COMPLETE" : "CORE BREACHED";
   elements.resultGlyph.textContent = result.rank;
   elements.resultHeading.textContent = result.title;
   if (completedNow) {
-    elements.resultMessage.textContent = `${result.message}${recoverySummary} 마지막 기억 조각과 MORI의 최종 기록을 복구했습니다.`;
+    elements.resultMessage.textContent = `${result.message} 마지막 기억 조각과 MORI의 최종 기록을 복구했습니다.`;
   } else if (foundNewFragment) {
-    elements.resultMessage.textContent = `${result.message}${recoverySummary} ${recoveredRecord.code}가 열렸습니다. 저장하면 다음 방문에도 읽을 수 있습니다.`;
+    elements.resultMessage.textContent = `${result.message} ${recoveredRecord.code}가 열렸습니다. 저장하면 다음 방문에도 읽을 수 있습니다.`;
   } else if (runtime.pendingFragments >= MAX_MEMORY_FRAGMENTS) {
-    elements.resultMessage.textContent = `${result.message}${recoverySummary} MORI의 여섯 기록은 이미 모두 복구되어 있습니다.`;
+    elements.resultMessage.textContent = `${result.message} MORI의 여섯 기록은 이미 모두 복구되어 있습니다.`;
   } else {
-    elements.resultMessage.textContent = `${result.message}${recoverySummary} 이번 감사에서는 새 기억 조각을 얻지 못했습니다.`;
+    elements.resultMessage.textContent = `${result.message} 이번 런에서는 새 기억 조각을 얻지 못했습니다.`;
   }
   elements.resultScore.textContent = formatScore(runtime.score);
   elements.resultRank.textContent = result.rank;
-  elements.resultTruth.textContent = `${runtime.correct}/${TOTAL_ROUNDS}`;
+  elements.resultTruth.textContent = String(runtime.purges);
   elements.resultFragments.textContent = `${runtime.pendingFragments}/${MAX_MEMORY_FRAGMENTS}`;
   elements.rememberButtonLabel.textContent = completedNow
     ? "마지막 파일 저장하고 다시"
@@ -1631,10 +959,6 @@ async function finishGame() {
   revealScreenOnStackedLayout(elements.resultScreen);
   audio.finish(result.ending === "verified");
   if (runtime.inputMode === "keyboard") {
-    // Focus the heading, not a button: a habitual Enter carried over from the
-    // wave-transition screen must not immediately re-trigger a restart before
-    // the player has seen their score. ArrowLeft/ArrowRight still reach the
-    // result buttons via moveFocus (which defaults to index 0 from no focus).
     elements.resultHeading.tabIndex = -1;
     elements.resultHeading.focus({ preventScroll: true });
   }
@@ -1642,7 +966,7 @@ async function finishGame() {
   const directiveAnnouncement = runtime.directiveCompleted
     ? ` MORI REQUEST 완료, 보너스 ${runtime.directive.bonus}점.`
     : " MORI REQUEST 미완료.";
-  announce(`${result.title} 점수 ${formatScore(runtime.score)}, 랭크 ${result.rank}, 기억 조각 ${runtime.pendingFragments}/${MAX_MEMORY_FRAGMENTS}.${directiveAnnouncement}${recordAnnouncement}`);
+  announce(`${result.title} 점수 ${formatScore(runtime.score)}, 랭크 ${result.rank}, 정화 ${runtime.purges}회, 기억 조각 ${runtime.pendingFragments}/${MAX_MEMORY_FRAGMENTS}.${directiveAnnouncement}${recordAnnouncement}`);
 }
 
 async function rememberResultAndRestart() {
@@ -1662,12 +986,11 @@ async function rememberResultAndRestart() {
 }
 
 async function forgetAndReturn() {
-  cancelRoundTimers();
+  cancelRunTimers();
   updateStorageLabel(await clearMemory());
   runtime.memory = { ...EMPTY_MEMORY, visits: 1 };
   runtime.memoryFound = false;
   runtime.lastResult = null;
-  runtime.tabLeft = false;
   runtime.mode = "intro";
   document.title = "STATE//LESS — 이 페이지는 당신을 기억한다";
   renderIntro("이제 당신을 모릅니다.");
@@ -1678,68 +1001,27 @@ async function forgetAndReturn() {
   if (runtime.inputMode === "keyboard") target.focus({ preventScroll: true });
 }
 
-function regenerateActiveRound(reason, moriState = "observing") {
-  if (runtime.mode !== "play" || runtime.locked) return;
-  runtime.stateRevision += 1;
-  createDeck();
-  showToast(reason);
-  startWave();
-  setMoriState(moriState);
-}
-
 function handleVisibilityChange() {
   if (!runtime.ready || !document.hidden) {
-    if (!document.hidden && runtime.mode === "paused") {
-      runtime.mode = "play";
-      updateTelemetry();
-      regenerateActiveRound("탭 이탈이 기록되어 현재 문장을 다시 추론했습니다.", "tab-left");
+    if (!document.hidden && runtime.mode === "play" && runtime.locked && runtime.pausedAt > 0) {
+      const pauseDuration = performance.now() - runtime.pausedAt;
+      runtime.pausedAt = 0;
+      runtime.runStartAt += pauseDuration;
+      runtime.nextSpawnAt += pauseDuration;
+      runtime.slots.forEach((slot) => {
+        if (slot.state === "fake" || slot.state === "genuine") slot.deadline += pauseDuration;
+      });
+      runtime.locked = false;
+      runtime.lastFrameAt = 0;
+      runtime.animationFrame = window.requestAnimationFrame(gameLoop);
     }
     return;
   }
 
-  runtime.tabLeft = true;
-  updateTelemetry();
   if (runtime.mode === "play" && !runtime.locked) {
-    cancelRoundTimers();
-    runtime.mode = "paused";
+    runtime.locked = true;
+    runtime.pausedAt = performance.now();
   }
-}
-
-function handleEnvironmentChange(message, moriState = "observing") {
-  updateTelemetry();
-  regenerateActiveRound(message, moriState);
-}
-
-function setupPresenceChannel() {
-  if (!("BroadcastChannel" in window)) return;
-  const channel = new BroadcastChannel("state-less-presence-v1");
-  const tabId = runtime.sessionId;
-
-  channel.addEventListener("message", (event) => {
-    if (!event.data || event.data.id === tabId) return;
-    runtime.peerLastSeenAt = Date.now();
-    if (!runtime.peerPresent) {
-      runtime.peerPresent = true;
-      handleEnvironmentChange("같은 페이지의 다른 탭이 감지되었습니다.", "other-self");
-    }
-    if (event.data.type === "hello") {
-      channel.postMessage({ type: "present", id: tabId });
-    }
-  });
-
-  channel.postMessage({ type: "hello", id: tabId });
-  const heartbeat = window.setInterval(() => {
-    channel.postMessage({ type: "ping", id: tabId });
-    if (runtime.peerPresent && Date.now() - runtime.peerLastSeenAt > 5_500) {
-      runtime.peerPresent = false;
-      handleEnvironmentChange("다른 탭의 신호가 사라졌습니다.");
-    }
-  }, 2_000);
-
-  window.addEventListener("beforeunload", () => {
-    window.clearInterval(heartbeat);
-    channel.close();
-  }, { once: true });
 }
 
 function handleGlobalKeydown(event) {
@@ -1748,28 +1030,7 @@ function handleGlobalKeydown(event) {
   }
   if (!runtime.ready) return;
 
-  if (
-    runtime.mode === "play"
-    && runtime.locked
-    && (event.key === " " || event.key === "Enter")
-  ) {
-    event.preventDefault();
-    if (!event.repeat) advanceRound();
-    return;
-  }
-
   if (runtime.mode === "play" && !runtime.locked) {
-    if (
-      event.key === "ArrowLeft"
-      || event.key === "ArrowRight"
-      || event.key === "ArrowUp"
-      || event.key === "ArrowDown"
-    ) {
-      event.preventDefault();
-      runtime.keysDown.add(event.key);
-      runtime.moveTargetIndex = -1;
-      return;
-    }
     if (event.key.toLowerCase() === "d") {
       event.preventDefault();
       if (!event.repeat) toggleDeepVerifyWager();
@@ -1780,19 +1041,10 @@ function handleGlobalKeydown(event) {
       if (!event.repeat) useArchiveLens();
       return;
     }
-    if (event.key === "1") {
+    const slotNumber = Number.parseInt(event.key, 10);
+    if (Number.isInteger(slotNumber) && slotNumber >= 1 && slotNumber <= SLOT_COUNT) {
       event.preventDefault();
-      judgeSession("true");
-      return;
-    }
-    if (event.key === "2") {
-      event.preventDefault();
-      judgeSession("false");
-      return;
-    }
-    if (event.key === "3") {
-      event.preventDefault();
-      judgeSession("corrupted");
+      activateSlot(slotNumber - 1);
       return;
     }
     return;
@@ -1813,7 +1065,6 @@ function handleGlobalKeydown(event) {
 async function initialize() {
   runtime.sessionId = createSessionId();
   elements.sessionCode.textContent = `SESSION ${runtime.sessionId.slice(0, 4)}`;
-  setupPresenceChannel();
 
   const loaded = await loadMemory();
   runtime.adapter = loaded.adapter;
@@ -1848,12 +1099,6 @@ document.addEventListener("pointerdown", (event) => {
   if (event.isPrimary) recordInput("mouse");
 }, { capture: true });
 document.addEventListener("keydown", handleGlobalKeydown, { capture: true });
-document.addEventListener("keyup", (event) => {
-  runtime.keysDown.delete(event.key);
-}, { capture: true });
-window.addEventListener("blur", () => {
-  runtime.keysDown.clear();
-});
 
 elements.memoryButtons.forEach((button) => {
   button.addEventListener("click", () => startGame(button.dataset.memoryPolicy));
@@ -1861,10 +1106,6 @@ elements.memoryButtons.forEach((button) => {
 elements.returnStartButton.addEventListener("click", () => startGame());
 elements.lensButton.addEventListener("click", useArchiveLens);
 elements.deepVerifyButton.addEventListener("click", toggleDeepVerifyWager);
-elements.zoneTrue.addEventListener("click", () => judgeSession("true"));
-elements.zoneFalse.addEventListener("click", () => judgeSession("false"));
-elements.zoneCorrupted.addEventListener("click", () => judgeSession("corrupted"));
-elements.roundContinueButton.addEventListener("click", advanceRound);
 elements.rememberButton.addEventListener("click", rememberResultAndRestart);
 elements.forgetButton.addEventListener("click", forgetAndReturn);
 elements.soundButton.addEventListener("click", () => {
@@ -1873,19 +1114,6 @@ elements.soundButton.addEventListener("click", () => {
 });
 
 document.addEventListener("visibilitychange", handleVisibilityChange);
-window.addEventListener("online", () => handleEnvironmentChange("네트워크 상태가 온라인으로 바뀌었습니다."));
-window.addEventListener("offline", () => handleEnvironmentChange("네트워크 상태가 오프라인으로 바뀌었습니다."));
-darkModeQuery.addEventListener("change", () => handleEnvironmentChange("화면 색상 선호가 바뀌었습니다."));
-reducedMotionQuery.addEventListener("change", () => handleEnvironmentChange("움직임 선호가 바뀌었습니다."));
-window.addEventListener("resize", () => {
-  window.clearTimeout(runtime.resizeTimer);
-  runtime.resizeTimer = window.setTimeout(() => {
-    const nextViewport = window.innerWidth >= 720 ? "wide" : "narrow";
-    if (runtime.snapshot && runtime.snapshot.viewport !== nextViewport) {
-      handleEnvironmentChange("화면 폭이 바뀌어 문장을 다시 배치했습니다.");
-    }
-  }, 180);
-});
 
 updateSoundButton();
 initialize().catch((error) => {

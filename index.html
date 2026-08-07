@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta
       name="description"
-      content="누군가 당신인 척 이 브라우저에 들어오려 한다. 세션 검증 AI MORI와 함께 실시간으로 진짜 흔적과 위조된 흔적을 가려내는 시그널 트리아지 게임"
+      content="MORI의 코어를 지키는 60초 리플렉스 아케이드. 화면 곳곳에서 짧게 반짝이는 가짜 신호만 정화하고 진짜 신호는 그대로 흘려보내세요."
     />
     <meta name="theme-color" content="#070a12" />
     <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
@@ -51,9 +51,9 @@
           <span>당신을<br />기억한다.</span>
         </h1>
         <p class="lede">
-          이 출처에서 깨어난 세션 검증 AI MORI. 누군가 당신인 척 이 브라우저에
-          들어오려 합니다 — 진짜 흔적과 위조된 흔적을 실시간으로 가려내
-          여섯 번의 검증을 통과하세요.
+          이 출처에서 깨어난 세션 검증 AI MORI. 누군가 당신인 척 코어에 가짜
+          신호를 흘려보냅니다 — 60초 동안 화면 곳곳에서 짧게 반짝이는 가짜
+          신호만 재빨리 정화하고, 진짜 신호는 그대로 흘려보내 코어를 지키세요.
         </p>
 
         <dl class="telemetry" id="telemetry-list" aria-label="현재 브라우저 텔레메트리">
@@ -85,7 +85,7 @@
 
         <div class="technology-note">
           <span>WEB-NATIVE ENGINE</span>
-          <p>COOKIE STORE · VIEW TRANSITION · BROADCAST CHANNEL · WEB AUDIO</p>
+          <p>COOKIE STORE · VIEW TRANSITION · WEB AUDIO</p>
         </div>
       </section>
 
@@ -134,11 +134,11 @@
             <p class="mission-brief" id="mission-brief" data-state="next">
               <span class="mission-label" id="mission-brief-label">NEXT FILE</span>
               <span class="mission-copy" id="mission-brief-copy">
-                여섯 번의 감사 중 다섯 번 이상 성공하면 다음 MORI 파일이 열립니다.
+                60초 런에서 A랭크 이상으로 코어를 지켜내면 다음 MORI 파일이 열립니다.
               </span>
               <span class="mission-directive" id="intro-directive">
                 <span>MORI REQUEST</span>
-                <strong id="intro-directive-copy">SYNC CHAIN · 연속 정답 4회 달성</strong>
+                <strong id="intro-directive-copy">COMBO CHAIN · 최고 콤보 ×8 달성</strong>
                 <small id="intro-directive-reward">+600</small>
               </span>
             </p>
@@ -182,11 +182,11 @@
           <section class="screen game-screen" id="play-screen" aria-labelledby="round-heading" hidden>
             <header class="round-header">
               <div class="round-heading-copy">
-                <span class="micro-label" id="round-kicker">SESSION AUDIT · WAVE 01/06</span>
-                <h2 id="round-heading">이 세션은 정말 당신입니까?</h2>
+                <span class="micro-label" id="round-kicker">SIGNAL STRIKE</span>
+                <h2 id="round-heading">가짜 신호만 재빨리 정화하세요.</h2>
                 <p class="mori-dialogue">
                   <span aria-hidden="true">MORI //</span>
-                  <span id="mori-dialogue">세션이 들어오기 시작했어. 한 줄씩 놓치지 말고 봐.</span>
+                  <span id="mori-dialogue">신호가 들어오기 시작했어. 가짜만 지워.</span>
                 </p>
               </div>
               <div class="round-side">
@@ -207,9 +207,9 @@
                   </span>
                 </div>
                 <div class="round-counters">
-                  <div class="round-time-block" id="round-time-block" aria-label="남은 시간 18.0초">
+                  <div class="round-time-block" id="round-time-block" aria-label="남은 시간 60.0초">
                     <span>TIME</span>
-                    <strong id="round-time">18.0</strong>
+                    <strong id="round-time">60.0</strong>
                   </div>
                   <div class="score-block">
                     <span>SCORE</span>
@@ -219,29 +219,15 @@
               </div>
             </header>
 
-            <div class="integrity-line" aria-label="현재 감사 상태">
+            <div class="integrity-line" aria-label="현재 코어 상태">
               <div class="integrity-status">
-                <span>MEMORY INTEGRITY</span>
-                <div class="integrity-pips" id="integrity-pips" aria-label="기억 무결성 3">
+                <span>CORE INTEGRITY</span>
+                <div class="integrity-pips" id="integrity-pips" aria-label="코어 무결성 3">
                   <i></i><i></i><i></i>
                 </div>
               </div>
-              <div class="audit-progress" id="audit-progress" data-state="active" aria-label="검증 진행과 보상">
-                <div class="audit-progress-heading">
-                  <span>VERIFIED GATE <small id="audit-reward">NEXT MORI.LOG/01</small></span>
-                  <strong id="audit-gate-value">5 MORE</strong>
-                </div>
-                <ol aria-label="여섯 웨이브 진행 상황">
-                  <li data-wave="0"><span>01</span><strong aria-hidden="true">◆</strong></li>
-                  <li data-wave="1"><span>02</span><strong aria-hidden="true">·</strong></li>
-                  <li data-wave="2"><span>03</span><strong aria-hidden="true">·</strong></li>
-                  <li data-wave="3"><span>04</span><strong aria-hidden="true">·</strong></li>
-                  <li data-wave="4"><span>05</span><strong aria-hidden="true">·</strong></li>
-                  <li data-wave="5"><span>06</span><strong aria-hidden="true">·</strong></li>
-                </ol>
-              </div>
-              <output class="sync-status" id="sync-status" data-recovery="idle" aria-label="연속 정답 0, 추가 점수 0. 오류 뒤 3연속 정답으로 한 번 복구할 수 있습니다.">
-                <span>SYNC</span>
+              <output class="sync-status" id="sync-status" aria-label="콤보 0, 추가 점수 0.">
+                <span>COMBO</span>
                 <strong id="sync-value">×0</strong>
                 <small id="sync-bonus">+000</small>
               </output>
@@ -262,7 +248,7 @@
               </button>
             </div>
             <p class="sr-only" id="lens-help">
-              한 웨이브에 한 번, 런 전체 충전 하나를 사용해 지금 세션의 실제 판정을 밝힙니다.
+              런당 충전 하나를 사용해 4초 동안 모든 신호의 지속시간을 늘립니다.
             </p>
 
             <button
@@ -276,107 +262,77 @@
               <span class="deep-verify-mark" aria-hidden="true">◆</span>
               <span class="deep-verify-copy">
                 <small id="deep-verify-kicker">OPTIONAL WAGER · DEEP VERIFY</small>
-                <strong id="deep-verify-label">OFF · 정답 +350 / 오답 무결성 -2</strong>
+                <strong id="deep-verify-label">OFF · 정화 2배 점수 / 오클릭 코어 -2</strong>
               </span>
               <kbd aria-hidden="true">D</kbd>
             </button>
             <p class="sr-only" id="deep-verify-help">
-              웨이브당 한 번, 다음 판정 하나에 걸 수 있습니다. 그 판정이 정답이면 추가 점수를 받고,
-              오답이면 기억 무결성을 2칸 잃습니다. 무결성이 1칸이면 사용할 수 없습니다.
+              런당 한 번, 5초 동안 정화 점수가 2배로 오르지만 오클릭 시 코어 손실도 2배가 됩니다.
             </p>
 
-            <output class="wave-progress" id="wave-progress" aria-live="polite">정답 0 / 0 · 오답 0 · 놓침 0</output>
+            <output class="wave-progress" id="wave-progress" aria-live="polite">정화 0 · 오클릭 0 · 놓침 0</output>
 
             <div
-              class="terminal-room"
-              id="terminal-room"
+              class="signal-field"
+              id="signal-field"
               role="group"
-              aria-label="터미널 룸. 방향키로 이동하거나, 터미널을 클릭·탭해 이동합니다."
+              aria-label="신호 필드. 가짜 신호가 뜬 슬롯만 클릭하거나 번호 키 1부터 6까지로 정화하세요."
             >
-              <div class="operator-avatar" id="operator-avatar" aria-hidden="true"></div>
-              <button class="terminal-node" id="terminal-0" type="button" data-terminal-index="0" data-state="idle" style="--tx:16; --ty:24;">
-                <span class="terminal-ring" aria-hidden="true"></span>
-                <span class="terminal-icon" aria-hidden="true">▣</span>
-                <span class="sr-only">터미널 1</span>
+              <button class="signal-slot" id="slot-0" type="button" data-slot-index="0" data-state="idle" style="--sx:18; --sy:26;">
+                <span class="signal-ring" aria-hidden="true"></span>
+                <span class="signal-icon" aria-hidden="true"></span>
+                <kbd class="signal-key" aria-hidden="true">1</kbd>
+                <span class="sr-only">신호 슬롯 1</span>
               </button>
-              <button class="terminal-node" id="terminal-1" type="button" data-terminal-index="1" data-state="idle" style="--tx:50; --ty:14;">
-                <span class="terminal-ring" aria-hidden="true"></span>
-                <span class="terminal-icon" aria-hidden="true">▣</span>
-                <span class="sr-only">터미널 2</span>
+              <button class="signal-slot" id="slot-1" type="button" data-slot-index="1" data-state="idle" style="--sx:50; --sy:18;">
+                <span class="signal-ring" aria-hidden="true"></span>
+                <span class="signal-icon" aria-hidden="true"></span>
+                <kbd class="signal-key" aria-hidden="true">2</kbd>
+                <span class="sr-only">신호 슬롯 2</span>
               </button>
-              <button class="terminal-node" id="terminal-2" type="button" data-terminal-index="2" data-state="idle" style="--tx:84; --ty:24;">
-                <span class="terminal-ring" aria-hidden="true"></span>
-                <span class="terminal-icon" aria-hidden="true">▣</span>
-                <span class="sr-only">터미널 3</span>
+              <button class="signal-slot" id="slot-2" type="button" data-slot-index="2" data-state="idle" style="--sx:82; --sy:26;">
+                <span class="signal-ring" aria-hidden="true"></span>
+                <span class="signal-icon" aria-hidden="true"></span>
+                <kbd class="signal-key" aria-hidden="true">3</kbd>
+                <span class="sr-only">신호 슬롯 3</span>
               </button>
-              <button class="terminal-node" id="terminal-3" type="button" data-terminal-index="3" data-state="idle" style="--tx:24; --ty:82;">
-                <span class="terminal-ring" aria-hidden="true"></span>
-                <span class="terminal-icon" aria-hidden="true">▣</span>
-                <span class="sr-only">터미널 4</span>
+              <button class="signal-slot" id="slot-3" type="button" data-slot-index="3" data-state="idle" style="--sx:18; --sy:78;">
+                <span class="signal-ring" aria-hidden="true"></span>
+                <span class="signal-icon" aria-hidden="true"></span>
+                <kbd class="signal-key" aria-hidden="true">4</kbd>
+                <span class="sr-only">신호 슬롯 4</span>
               </button>
-              <button class="terminal-node" id="terminal-4" type="button" data-terminal-index="4" data-state="idle" style="--tx:76; --ty:82;">
-                <span class="terminal-ring" aria-hidden="true"></span>
-                <span class="terminal-icon" aria-hidden="true">▣</span>
-                <span class="sr-only">터미널 5</span>
+              <button class="signal-slot" id="slot-4" type="button" data-slot-index="4" data-state="idle" style="--sx:50; --sy:86;">
+                <span class="signal-ring" aria-hidden="true"></span>
+                <span class="signal-icon" aria-hidden="true"></span>
+                <kbd class="signal-key" aria-hidden="true">5</kbd>
+                <span class="sr-only">신호 슬롯 5</span>
+              </button>
+              <button class="signal-slot" id="slot-5" type="button" data-slot-index="5" data-state="idle" style="--sx:82; --sy:78;">
+                <span class="signal-ring" aria-hidden="true"></span>
+                <span class="signal-icon" aria-hidden="true"></span>
+                <kbd class="signal-key" aria-hidden="true">6</kbd>
+                <span class="sr-only">신호 슬롯 6</span>
               </button>
             </div>
-
-            <div class="triage-lane" id="triage-lane" role="group" aria-label="지금 심사 중인 세션"></div>
-            <p class="sr-only" id="triage-help">
-              방향키로 이동해 켜진 터미널에 도착하면 세션 카드가 열립니다. 왼쪽
-              MORI의 기록과 오른쪽 세션의 주장을 한 줄씩 비교한 뒤, 진짜·가짜·손상 버튼을
-              클릭하거나 숫자 1·2·3 키를 눌러 판정하세요.
+            <p class="sr-only" id="signal-help">
+              가짜 신호(rose, ✕ 표시)만 사라지기 전에 클릭하거나 번호 키 1부터 6까지로 정화하세요.
+              진짜 신호(cyan, ◆ 표시)를 클릭하면 코어 무결성이 줄어듭니다.
             </p>
-            <div class="triage-zones" id="triage-zones">
-              <button class="triage-zone" id="zone-true" data-zone="true" type="button">
-                <span>진짜</span>
-                <kbd aria-hidden="true">1</kbd>
-              </button>
-              <button class="triage-zone" id="zone-false" data-zone="false" type="button">
-                <span>가짜</span>
-                <kbd aria-hidden="true">2</kbd>
-              </button>
-              <button class="triage-zone" id="zone-corrupted" data-zone="corrupted" type="button">
-                <span>손상</span>
-                <kbd aria-hidden="true">3</kbd>
-              </button>
-            </div>
-
-            <div class="round-impact" id="round-impact" data-state="idle" aria-hidden="true">
-              <span class="round-impact-portrait">
-                <img
-                  id="round-impact-portrait-img"
-                  src="./mori/mori_boot-empty.webp"
-                  width="1024"
-                  height="1024"
-                  alt=""
-                  decoding="async"
-                />
-              </span>
-              <span class="round-impact-copy">
-                <small id="round-impact-label">TRACE ACCEPTED</small>
-                <strong id="round-impact-value">+0000</strong>
-                <span id="round-impact-detail">SYNC ×1</span>
-              </span>
-            </div>
 
             <div class="board-footer">
-              <p id="board-instruction">MORI의 기록과 세션의 주장을 나란히 비교해 다른 한 줄을 찾으세요.</p>
+              <p id="board-instruction">가짜(rose, ✕) 신호만 클릭하세요. 진짜(cyan, ◆)는 그대로 흘려보내세요.</p>
               <output id="directive-readout">MORI REQUEST · WAITING</output>
             </div>
             <div class="round-resolution">
               <p class="round-feedback" id="round-feedback" aria-live="polite"></p>
-              <button class="round-continue-button" id="round-continue-button" type="button" hidden>
-                <span id="round-continue-label">NEXT WAVE</span>
-                <kbd aria-hidden="true">Enter</kbd>
-              </button>
             </div>
           </section>
 
           <section class="screen result-screen" id="result-screen" aria-labelledby="result-heading" hidden>
-            <p class="speaker-label" id="result-kicker">AUDIT COMPLETE</p>
+            <p class="speaker-label" id="result-kicker">RUN COMPLETE</p>
             <div class="result-glyph" id="result-glyph" aria-hidden="true">∴</div>
-            <h2 id="result-heading">기억이 정리되었습니다.</h2>
+            <h2 id="result-heading">코어 방어가 끝났습니다.</h2>
             <p class="mori-dialogue result-mori-dialogue">
               <span aria-hidden="true">MORI //</span>
               <span id="result-mori-dialogue">약속대로 내 기록 하나를 줄게. 다음에도 잊지 마.</span>
@@ -391,7 +347,7 @@
             <dl class="result-stats">
               <div><dt>SCORE</dt><dd id="result-score">00000</dd></div>
               <div><dt>RANK</dt><dd id="result-rank">—</dd></div>
-              <div><dt>TRUTH</dt><dd id="result-truth">0/6</dd></div>
+              <div><dt>PURGED</dt><dd id="result-truth">0</dd></div>
               <div><dt>SHARDS</dt><dd id="result-fragments">0/6</dd></div>
             </dl>
 

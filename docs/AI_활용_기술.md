@@ -9,6 +9,7 @@
 3. **AI가 찾아낸 이슈를 그대로 믿지 않고 소스 코드로 재검증**: 서브에이전트가 보고한 버그 주장들을 곧바로 반영하지 않고 `main.js`의 실제 코드를 하나씩 대조해 사실 여부를 확인한 뒤에만 반영했습니다. 이 검증 과정에서 두 건은 실제 버그로 확인되어 수정했고(오답 대사 고정 오류, ARCHIVE LENS 설명 불일치), 나머지는 "의도된 설계"로 판단해 이번 범위에서 제외했습니다.
 4. **이론까지 근거로 삼아 다시 만든 결과물도, 실제 플레이 앞에서는 다시 의심함**: MDA·Koster 이론에 근거해 `SIGNAL TRIAGE`로 전면 재설계하고 서브에이전트 플레이테스트로 "이전보다 재밌다"고 검증까지 마쳤지만, 참여자가 직접 플레이해보고 "속도만 오르고 판단은 항상 단일 대조라 스킬 천장이 없다"고 재차 지적함. 이 지적을 이론적으로 재분석해(Papers, Please식 판단 구조와 대조) 근본 원인이 "판단 자체의 복잡도가 절대 늘지 않는 구조"에 있음을 확인하고, 메커닉을 다시 한 번 전면 교체(`SESSION AUDIT`, §3 "핵심 메커닉 전면 재설계")했습니다. 이미 한 번 이론·플레이테스트로 검증했다는 사실에 안주하지 않고, 사용자의 재반박을 받아들여 재설계까지 이어간 사례입니다.
 5. **마감 압박 속에서 "전면 재제작"이라는 요청을 코드 재검토로 절충안으로 좁힘**: Papers, Please식 대조로 전환한 뒤에도 "여전히 게임 형태를 띠고 있다고 보기 어렵다"는 평가를 받고 참여자가 처음부터 다시 만드는 것도 검토를 요청했지만, NAN 2026 사전과제 마감이 3일 남은 시점이라는 제약을 먼저 확인함. 코드를 다시 읽어 `game-logic.js`(웨이브 곡선·채점·메타 진행 전체)가 DOM에 의존하지 않는 순수 함수임을 확인한 뒤, "판정 로직은 재사용하고 판정에 도달하는 방식(이동+도킹)만 새로 만드는" 절충 설계를 역제안하고 승인받았습니다. 구현 후에는 주장으로 끝내지 않고 Puppeteer로 실제 크롬을 띄워 이동·도킹·채점·웨이브 실패·놓침(timeout) 다섯 가지 경로를 직접 조작해 재현했습니다(§2 "터미널 필드 재설계").
+6. **검증까지 마친 재설계도 "여전히 문서작업 같다"는 재평가를 받자 판정 자체를 폐기함**: 이동+도킹까지 얹어 다섯 경로를 전부 검증했지만, 참여자가 "게임처럼 느껴지지 않는 건 문답 부분이고, 텍스트 대조는 문서작업에 가깝다"고 재차 지적함. 포장(이동)이 아니라 조작의 본질(읽기·비교) 자체가 문제라는 뜻으로 재진단하고, 텍스트 판정을 완전히 버리고 색·기호로 즉시 구분되는 신호를 클릭하는 반응형 아케이드(`SIGNAL STRIKE`)로 교체함. 다섯 번째 재설계까지 쌓인 검증(Puppeteer 시나리오)에 안주하지 않고, "검증되었다"와 "재밌다"는 다른 질문이라는 걸 다시 받아들인 사례입니다(§2 "핵심 메커닉 전면 교체: SIGNAL STRIKE").
 
 ## 1. AI 활용 개요
 
@@ -216,6 +217,28 @@ Papers, Please식 대조로 전환한 뒤에도 참여자가 실제 게임으로
 - 터미널 잔여시간이 30% 미만이면 `data-urgent="true"`를 부여해 amber 점멸을 rose로, 펄스 주기를 900ms→420ms로 빠르게 전환하는 CSS만 추가(`updateTerminalTimers`, `styles.css`) — 새 색상 토큰이나 애니메이션 원리는 만들지 않고 기존 `--warm`/`--danger` 토큰과 `terminal-pulse` 키프레임을 재사용
 - 두 변경 모두 Puppeteer로 재검증: 터미널 잔여시간이 30% 아래로 내려가면 `data-urgent`가 `true`로, 시간 초과 후 새 세션이 배정되면 다시 `false`로 정확히 전환되는지, `audio.warning()` 추가로 새 콘솔 에러가 발생하지 않는지 확인
 
+### 핵심 메커닉 전면 교체: SIGNAL STRIKE 리플렉스 아케이드
+
+> 게임처럼 느껴지지않는건 문답 부분이고, 기록(텍스트)를 대조하는게 게임이라기 보다는 문서작업에 가까워보여, 게임을 그냥 처음부터 다시 만든다고 생각하는게 나을것같아. 아케이드 게임인데, 메타적 요소를 가진 아케이드나, 미니게임은 어때?
+
+이동+도킹 레이어를 얹고 다섯 경로(도킹·채점·웨이브 실패·놓침·키보드 이동)까지 전부 Puppeteer로 검증했지만, 참여자가 직접 플레이해보고 다시 "게임 같지 않다"고 평가함. 이번 지적의 초점은 이동이 아니라 도킹 이후의 판정 자체였음 — 두 텍스트 열을 읽고 다른 한 줄을 찾아 세 버튼 중 하나를 누르는 조작은 이동으로 감싸도 본질적으로 "읽고 비교하는" 문서 작업이라는 뜻으로 재진단함. 참여자가 직접 방향("아케이드 + 메타적 요소")을 제시했고, 이번에는 이론 조사 대신 두 구체적 후보를 스케치해 제시함: (A) `SIGNAL STRIKE` — 두더지잡기/과일 베기형, 팝업된 신호가 진짜/가짜인지 즉시 판단해 반응하는 방식, (B) `CORE DEFENSE` — 미사일 커맨드형, 화면 가장자리에서 다가오는 가짜 신호를 요격하는 방식. 이동·충돌 로직이 필요 없어 마감을 앞둔 시점의 구현 리스크가 더 낮다는 점을 근거로 (A)를 추천했고, 참여자가 이를 선택함.
+
+핵심 설계 결정: 판정 자체(읽기·대조·분류)를 완전히 폐기하고 조작의 본질을 반응 속도로 바꾼다.
+
+- **텍스트 대조를 색·기호 즉시 판별로 교체.** `MORI의 기록`/`이 세션의 주장` 2~3줄 비교 카드를 없애고, 신호 하나당 rose `✕`(가짜) 또는 cyan `◆`(진짜) 아이콘 하나만 보여줌. 판단에 걸리는 시간을 "읽는 시간"에서 "보는 즉시 아는 시간"으로 줄이는 것이 이번 재설계의 유일한 목적임.
+- **웨이브(6판) 구조를 폐기하고 60초 단일 런 + 시간 기반 escalation으로 전환.** 신호 등장 간격(900ms→340ms), 지속시간(1.45초→0.7초), 동시 개수(1→4)가 경과 시간만으로 계산되는 순수 함수(`getSpawnIntervalMs`/`getSignalLifespanMs`/`getMaxConcurrentSignals`)로 구현되어, 6웨이브 대신 한 판 안에서 연속적으로 어려워짐.
+- **이동+도킹 레이어에서 이미 검증한 패턴(고정 슬롯, conic-gradient 링, 클릭+번호 키 이중 입력)을 그대로 재사용하고 "걸어가기"만 제거.** 터미널 5개를 신호 슬롯 6개(2행 3열)로 바꾸고, 각 슬롯에 항상 번호 키(1~6)를 붙여 요원 이동 없이 즉시 반응하게 함.
+- **비대칭 페널티 원칙은 그대로 유지하되 대상만 바꿈.** "위조 승인이 오인보다 무겁다"는 원칙을, "진짜를 잘못 클릭하는 것(코어 무결성 -1)이 가짜를 놓치는 것(콤보만 끊김, 무결성 무변화)보다 무겁다"로 재적용. 새 함수 `getWrongClickLoss(deepVerify)`만 추가하고 원칙 자체는 재사용.
+- **`ARCHIVE LENS`/`DEEP VERIFY`/`MORI REQUEST`/기억 조각 시스템은 트리거만 재정의하고 계산 로직은 재사용.** `ARCHIVE LENS`는 "판정 공개"에서 "4초 동안 신호 지속시간 1.6배" 슬로모션으로, `DEEP VERIFY`는 "웨이브당 1회 다음 판정"에서 "런당 1회 5초 2배 윈도"로 바뀌었지만, 충전 수 계산(`getArchiveLensCharges`)과 기억 조각 보상(`getFragmentReward`, `getMoriArchiveRecord`)은 한 줄도 바꾸지 않음.
+
+반영 내용:
+
+- `game-logic.js`를 웨이브/세션/사실-카탈로그 관련 함수(`getWaveConfig`, `createSessionClaims`, `createFactCatalog`, `getWrongJudgmentLoss`, `getAuditGateStatus`, `getSyncRecoveryIndex` 등)를 전부 제거하고, 60초 escalation 곡선과 반응형 채점 함수(`getSpawnIntervalMs`, `getSignalLifespanMs`, `getMaxConcurrentSignals`, `pickSignalKind`, `scorePurge`, `getWrongClickLoss`)로 다시 작성. `clamp`/`seedFromString`/`createRandom`/`formatScore`와 기억 조각·아카이브 레코드 함수(`awardMemoryFragment`, `getArchiveLensCharges`, `getFragmentReward`, `getMoriArchiveRecord`)는 변경 없이 재사용
+- `main.js`의 세션 흐름 전체(터미널 상태머신, 아바타 이동, 도킹/언도킹, 룸 렌더링)를 제거하고, 슬롯 상태머신(`idle → fake|genuine → hit|wrong|missed → idle`)과 단일 `requestAnimationFrame` 루프(`gameLoop`)로 재작성. 클릭과 번호 키(1~6)가 같은 `activateSlot(index)`를 호출해 입력 경로를 통일
+- 탭 이탈 시 60초 타이머와 모든 슬롯의 남은시간을 함께 멈추고, 복귀 시 멈춘 시간만큼 타임스탬프를 그대로 밀어 넣는 방식으로 `handleVisibilityChange`를 재작성 — 이전에는 탭 이탈이 "새 세션 재추론" 트리거였지만, 이제는 판정 대상 자체가 사라져 재추론할 것이 없으므로 단순 일시정지로 단순화
+- `index.html`의 터미널 룸·세션 카드·트리아지 3버튼·라운드 임팩트 오버레이를 신호 슬롯 6개 + HUD로 교체하고, `styles.css`에서 대응하는 죽은 규칙(`.terminal-room`, `.terminal-node`, `.triage-*`, `.session-card`, `.claim-*`, `.round-impact*`, `.audit-progress*`)을 전부 제거 — 빌드 후 CSS 번들이 48.5KB→37.7KB로 줄어든 것으로 삭제 범위를 재확인
+- Puppeteer로 재검증: 가짜 신호를 클릭하면 정화·점수·콤보가 오르는지, 진짜 신호를 클릭하면 코어 무결성이 줄고 콤보가 끊기는지, 오클릭 3회로 무결성이 0이 되면 결과 화면에 `NULL` 랭크로 도달하는지, `F`(ARCHIVE LENS)·`D`(DEEP VERIFY) 키가 실제로 상태를 바꾸는지, DEEP VERIFY 활성 중 정화 점수가 정확히 2배로 채점되는지, 번호 키 1~6이 클릭과 동일하게 동작하는지 확인 — 콘솔 에러 0건
+
 ## 3. AI가 지원한 구현 영역
 
 ### 기획
@@ -225,6 +248,7 @@ Papers, Please식 대조로 전환한 뒤에도 참여자가 실제 게임으로
 - 재방문, 탭 이탈, 복수 탭 감지를 메타 서사로 연결
 - 기억 조각 6개를 쿠키에 저장하는 중기 진행 목표 설계
 - 판정 로직은 그대로 두고 "세션에 도달하는 방식"만 교체해 개발 리스크를 낮추는 절충 설계 — 룸에 배치된 여러 터미널이 동시에 켜지고 요원을 직접 이동시켜야 카드가 열리는 이동+도킹 레이어와, 그로 인해 생기는 "어디부터 갈지" 실시간 우선순위 판단 설계
+- (텍스트 판정 자체를 폐기하고 대체) 색·기호로 즉시 구분되는 신호를 60초 안에 반응 처리하는 순수 반응형 아케이드 설계 — 고정 슬롯·번호 키 입력·비대칭 페널티 원칙은 이전 재설계에서 재사용하고, 웨이브 구조와 텍스트 대조만 폐기
 
 ### 개발
 
@@ -245,11 +269,12 @@ Papers, Please식 대조로 전환한 뒤에도 참여자가 실제 게임으로
 - 외부 파일 없는 Web Audio 효과음 구현
 - GitHub Pages Actions 워크플로 작성
 - (이후 터미널 이동+도킹 재설계로 대체됨) 세션 제시·카운트다운을 담당하던 `requestAnimationFrame` 루프(`updateSessionFrame`)와 순수 판정 함수(`judgeSession`, `expireSession`, `advanceSessionOrConclude`)로 심문관형 판단 메커닉 구현. 씬 전환마다 다르던 상단 지시문을 웨이브가 바뀌어도 동일한 공통 상수(`PLAY_INSTRUCTION`)로 유지 — 이 원칙은 현재 구조에서도 그대로 유지됨
-- 요원 이동·터미널 도킹·근접 판정을 담당하는 단일 `requestAnimationFrame` 루프 `roomLoop`(및 `updateAvatarPosition`/`updateTerminalTimers`/`updateDocking`)와, 도킹된 세션의 판정·놓침을 처리하는 `judgeSession`/`handleTerminalTimeout`/`settleTerminal`/`checkWaveCompletion`/`concludeWave`로 이동형 심문관 판단 메커닉 구현(§4 "터미널 이동+도킹 시스템" 참고)
-- 플레이 통계(회복 발동 여부·`DEEP VERIFY` 승리 횟수·무결점 여부)로 4가지 런 스타일 태그를 계산하는 순수 함수 `getRunStyleTag`/`getRunStyleRemark` 구현, 결과 화면 MORI 대사에 반영
-- 이미 계산되어 있던 `createFactCatalog`의 `label`/`value`를 그대로 나열하는 `LIVE SIGNAL` 패널(`renderLiveSignalPanel`) 구현 — 새 데이터/로직 없이 `createDeck()` 한 곳에서만 호출해 환경 변화 시에도 자동 갱신
-- `pulseMoriState`에 `dialogueOverride` 매개변수를 추가해, 오답 시 MORI 대사가 실제 정답 구역에 맞는 3종 문구 중 정확한 것으로 분기되도록 구현
-- 위조 세션 승인(무결성 -2)과 진짜 세션 오인 거부(무결성 -1)를 구분하는 `getWrongJudgmentLoss(mistakeType, deepVerify)` 구현
+- (SIGNAL STRIKE 재설계로 대체됨) 요원 이동·터미널 도킹·근접 판정을 담당하던 단일 `requestAnimationFrame` 루프 `roomLoop`와 `judgeSession`/`handleTerminalTimeout`/`settleTerminal`/`checkWaveCompletion`/`concludeWave`로 이동형 심문관 판단 메커닉 구현
+- 플레이 통계(위험 검증 승리 횟수·무결점 여부·LENS 사용 횟수)로 4가지 런 스타일 태그를 계산하는 순수 함수 `getRunStyleTag`/`getRunStyleRemark` 구현, 결과 화면 MORI 대사에 반영 — SIGNAL STRIKE에서도 입력값(콤보·오클릭·DEEP VERIFY 정화 수)만 바꿔 재사용
+- 위조 세션 승인(무결성 -2)과 진짜 세션 오인 거부(무결성 -1)를 구분하던 `getWrongJudgmentLoss(mistakeType, deepVerify)`를, "진짜 오클릭"이라는 단일 실수 유형에 대한 `getWrongClickLoss(deepVerify)`로 단순화해 재구현(기본 -1, DEEP VERIFY 중 -2 원칙은 그대로)
+- 60초 escalation 곡선(`getSpawnIntervalMs`/`getSignalLifespanMs`/`getMaxConcurrentSignals`), 슬롯 상태머신, 단일 게임 루프 `gameLoop`로 SIGNAL STRIKE 반응형 판정 메커닉 구현(§4 "SIGNAL STRIKE 반응형 판정" 참고)
+- `ARCHIVE LENS`를 4초 슬로모션 버프(신호 지속시간 1.6배), `DEEP VERIFY`를 5초 2배 채점 윈도로 재구현. 두 자원 모두 충전 계산·잠금 로직은 이전 재설계에서 그대로 재사용
+- Page Visibility 일시정지 로직을 "새 세션 재추론"에서 "타임스탬프를 멈춘 시간만큼 그대로 밀어 넣는" 방식으로 단순화 — 판정 대상(세션 주장)이 사라지면서 재추론할 대상 자체가 없어졌기 때문
 
 ### 검증
 
@@ -268,25 +293,24 @@ Papers, Please식 대조로 전환한 뒤에도 참여자가 실제 게임으로
 - 가상 시계 하네스로 항상 `VERIFIED`만 판정했을 때 정답(손실 0)·위조 승인(손실 2)·진짜 오인(손실 1) 세 종류의 무결성 변화가 실제로 다르게 나타나는지 직접 재현해 비대칭 페널티를 확인
 - `ARCHIVE LENS`가 지금 세션의 실제 판정을 `data-reveal-zone`으로 정확히 표시하는지, `DEEP VERIFY` 토글이 다음 판정 한 번에만 적용되고(`dataset.active`) 소진 후 자동으로 꺼지는지 점검
 - 실제 브라우저 상태(matchMedia·navigator.onLine·innerWidth·쿠키)로부터 각 사실의 truth/lie/decoy 문구를 독립적으로 재구성해 세션 주장의 각 줄을 판정하는 자동 플레이가, 소스 코드 지식 없이 오직 화면에 보이는 정보만으로 6웨이브 전체를 무결성 손실 없이 클리어하고 S랭크·6/6으로 결과 화면에 도달하는지 확인(재구성한 36개 세션 전부에서 판정 불가 줄 0건) — 콘솔 에러 0건
-- (터미널 이동+도킹 재설계 이후) Puppeteer로 로컬 Chrome을 직접 조작해: 클릭 이동이 목표 터미널에 정확히 도킹하고 세션 카드가 열리는지, 판정 후 대기열의 다음 세션이 같은 슬롯에 즉시 이어지는지, 무결성이 0이 되면 결과 화면에 `NULL` 랭크로 도달하는지, 터미널에 도킹하지 않고 카운트다운만 흘려보내면 무결성 손실 없이 "놓침"만 기록되는지, 방향키 입력만으로 아바타 좌표가 실제로 변화하는지 확인 — 다섯 시나리오 모두 콘솔 에러 0건
+- (터미널 이동+도킹 재설계 이후, SIGNAL STRIKE 이전 상태) Puppeteer로 로컬 Chrome을 직접 조작해: 클릭 이동이 목표 터미널에 정확히 도킹하고 세션 카드가 열리는지, 판정 후 대기열의 다음 세션이 같은 슬롯에 즉시 이어지는지, 무결성이 0이 되면 결과 화면에 `NULL` 랭크로 도달하는지, 터미널에 도킹하지 않고 카운트다운만 흘려보내면 무결성 손실 없이 "놓침"만 기록되는지, 방향키 입력만으로 아바타 좌표가 실제로 변화하는지 확인 — 다섯 시나리오 모두 콘솔 에러 0건
+- (SIGNAL STRIKE) Puppeteer로 재검증: 가짜 신호 클릭 시 정화·점수·콤보 상승, 진짜 신호 클릭 시 코어 무결성 하락과 콤보 초기화, 오클릭 3회로 무결성이 0이 되면 결과 화면에 `NULL` 랭크로 도달, `F`/`D` 키로 `ARCHIVE LENS`·`DEEP VERIFY`가 실제로 활성화되고 DEEP VERIFY 중 정화 점수가 정확히 2배로 채점되는지, 번호 키 1~6이 클릭과 동일하게 슬롯을 정화하는지 확인 — 콘솔 에러 0건
 
 ## 4. 핵심 기술 구조
 
-### SESSION AUDIT 심문관형 판단
+### SIGNAL STRIKE 반응형 판정
 
-`createSessionClaims(catalog, waveIndex, seed)`가 세션 시드로 웨이브당 세션들을 만듭니다. 세션 하나는 `factsPerClaim`(웨이브당 2~3)개의 서로 다른 사실로 구성되며, 그중 정확히 하나의 줄만 `zone`에 따라 `lieText`(위조) 또는 `decoyText`(판독 불가)로 바뀌고 나머지는 전부 `truthText`입니다. 즉 진짜 세션은 모든 줄이 참이고, 위조·판독불가 세션은 "거의 다 참인데 한 줄만 다른" 형태라 모든 줄을 확인해야만 그 한 줄을 잡아낼 수 있습니다.
+신호는 더 이상 텍스트 주장으로 제시되지 않습니다. 고정된 6개 슬롯 중 idle 상태인 슬롯에 `pickSignalKind()`가 45% 확률로 `genuine`, 55% 확률로 `fake`를 뽑아 배정하고, 슬롯은 `idle → fake|genuine → hit|wrong|missed → idle`을 순환합니다. 진짜/가짜 구분은 슬롯에 표시되는 아이콘(`✕`/`◆`)과 색(rose/cyan) 하나로 끝나, 텍스트를 읽을 필요가 없습니다.
 
-판정 입력은 마우스와 키보드가 같은 모델을 공유합니다. 구역 버튼 클릭 또는 숫자 키 1/2/3로 지금 도킹된 세션을 즉시 판정하며, 판정은 순수 함수 `judgeSession`이 담당합니다. 오답의 무결성 손실은 실수 유형에 따라 비대칭적으로 적용됩니다 — `getWrongJudgmentLoss(mistakeType, deepVerify)`가 위조를 진짜로 승인한 경우(`"approved-spoofed"`)만 2칸, 나머지(`"rejected-genuine"`/`"misjudged-corrupted"`)는 1칸을 반환합니다. 웨이브 종료 조건(웨이브가 요구하는 세션 수를 모두 처리·무결성 소진)은 `concludeWave`에서 한 곳으로 모아 처리합니다. 이 판정 계층은 이동+도킹 재설계 이후에도 값 하나 바뀌지 않고 그대로 재사용됩니다.
+난이도는 경과 시간(`elapsedMs`)만의 함수인 세 곡선으로 결정됩니다 — 신호 등장 간격 `getSpawnIntervalMs`(900ms→340ms), 신호 지속시간 `getSignalLifespanMs`(1.45초→0.7초), 동시 허용 개수 `getMaxConcurrentSignals`(1개→4개, 최대 6). 웨이브 같은 구간 구분이 없어, 60초 동안 연속적으로 어려워집니다.
+
+단일 `requestAnimationFrame` 루프 `gameLoop`가 매 프레임 세 가지를 처리합니다 — 각 슬롯의 남은 시간 갱신과 만료 처리(가짜 만료는 콤보만 초기화, 진짜 만료는 조용히 idle로), 다음 신호 스폰 여부 판단(간격 도달 + 동시 개수 여유 확인), 60초 경과 시 즉시 `finishRun()` 호출. 클릭과 번호 키(1~6)는 같은 `activateSlot(index)`를 호출해 입력 경로를 통일합니다.
+
+정화(`activateSlot`이 `fake` 슬롯에서 호출됨)는 순수 함수 `scorePurge(remainingRatio, combo, multiplier)`로 채점됩니다 — 반응 속도(남은 시간 비율)와 콤보 수에 비례해 점수가 오르고, `DEEP VERIFY` 활성 중이면 `multiplier`가 2가 됩니다. 오클릭(진짜 슬롯 클릭)은 `getWrongClickLoss(deepVerify)`가 기본 1칸, DEEP VERIFY 중이면 2칸의 무결성 손실을 반환합니다 — "위조 승인이 오인보다 무겁다"는 이전 재설계의 비대칭 페널티 원칙을 "오클릭이 놓침보다 무겁다"로 재적용한 것입니다.
+
+`ARCHIVE LENS`는 활성화 시 현재 켜진 모든 신호의 남은 시간에 고정 보너스(`LENS_EXTEND_BONUS_MS`)를 더하고, 이후 4초(`LENS_BOOST_MS`) 동안 새로 켜지는 신호의 지속시간을 1.6배로 늘립니다. `DEEP VERIFY`는 활성화 시점부터 5초(`DEEP_VERIFY_WINDOW_MS`) 동안 모든 판정에 2배 배율을 적용하며, 런당 한 번만 켤 수 있습니다. 두 자원 모두 실제 판정 로직(`scorePurge`/`getWrongClickLoss`)에 배율/보너스 값만 전달할 뿐, 판정 자체를 바꾸지 않습니다.
 
 이전 버전에서 사용하던 `@chenglou/pretext`(정적 텍스트 리플로 엔진)는 SIGNAL TRIAGE 재설계 때 실사용처가 사라져 의존성을 이미 제거했으며, 이번 재설계에서도 다시 필요해지지 않았습니다.
-
-### 터미널 이동+도킹 시스템
-
-세션은 더 이상 자동으로 하나씩 제시되지 않습니다. 웨이브 시작 시 `startWaveRoom`이 그 웨이브의 세션들을 대기열(`spawnQueue`)에 넣고, 웨이브별 동시 허용 수(`WAVE_CONCURRENT_TERMINALS`)만큼 터미널에 배정합니다. 각 터미널은 `idle → pending(카운트다운 시작) → active(도킹) → resolved-correct/resolved-wrong → idle`을 순환하며, `idle`로 돌아오는 즉시 대기열에 세션이 남아 있으면 같은 슬롯에 다음 세션을 이어 배정합니다(`spawnNextTerminal`).
-
-플레이어가 조작하는 요원의 위치는 화면 좌표(px) 기준으로 관리되며, 단일 `requestAnimationFrame` 루프 `roomLoop`가 매 프레임 세 가지를 처리합니다 — `updateAvatarPosition`(방향키 입력 또는 클릭·탭으로 지정한 목표 터미널을 향한 가속·최대 속도·감속), `updateTerminalTimers`(터미널별 잔여시간 갱신과 만료 시 `handleTerminalTimeout` 호출), `updateDocking`(요원과 가장 가까운 활성 터미널이 도킹 반경(34px) 안에 있으면 자동 도킹/해제). 방향키 이동과 클릭·탭 자동 이동은 같은 목표-추적 코드를 공유해 두 입력 경로의 난이도가 동일합니다.
-
-도킹되면 `dockTerminal`이 해당 터미널의 세션을 `renderSessionCard`로 그대로 표시합니다 — 카드 렌더링·2열 대조 UI는 변경하지 않았습니다. 판정(`judgeSession`) 또는 시간 초과(`handleTerminalTimeout`) 이후에는 `settleTerminal`이 짧게 결과색을 표시한 뒤 터미널을 비우고 대기열의 다음 세션을 이어 배정하며, `checkWaveCompletion`이 "대기열이 비었고 모든 터미널이 idle"인지 매번 확인해 웨이브 종료(`concludeWave`)를 트리거합니다.
 
 채점 기준점도 함께 바뀌었습니다. 기존에는 "세션이 제시된 시점"부터 경과 시간을 측정했지만, 이제는 도킹된 터미널의 `deadline`/`totalMs`(그 세션이 처음 켜진 시점부터의 전체 잔여시간 비율)를 기준으로 `scoreCorrectAnswer`를 호출합니다 — 이동 시간까지 포함해 "빨리 도착해 빨리 판정할수록" 보상하도록 재정의했습니다.
 
@@ -308,9 +332,9 @@ Papers, Please식 대조로 전환한 뒤에도 참여자가 실제 게임으로
 
 값은 읽은 뒤 형식·범위·허용 열거형을 다시 검증합니다. 최신 보안 컨텍스트에서는 이벤트 루프를 막지 않는 Cookie Store API를 우선 사용하고, 미지원 브라우저에서는 `SameSite=Strict`인 `document.cookie`로 전환합니다.
 
-### 결정적 로컬 추론
+### 결정적 로컬 추론 (SIGNAL STRIKE 이전, 참고용)
 
-방문·테마·시간·입력·탭·화면 폭·네트워크·이전 결말에 완료 런·보존 정책·최고 점수·기억 조각을 더한 14개 사실마다 참 문장(`truthText`), 거짓 문장(`lieText`), 제3의 오염 문장(`decoyText`)을 정의합니다. 웨이브가 시작될 때 세션 시드로 이 14개 사실 중 `factsPerClaim`개씩을 뽑아 결합한 세션들을 만들고(`createSessionClaims`), 웨이브가 진행될수록 목표 세션 수·결합 사실 개수·판독 불가 비율이 함께 늘어납니다. 같은 상태와 시드는 같은 세션 구성을 만들므로 테스트와 재현이 가능합니다.
+이전 재설계(SESSION AUDIT·이동+도킹)까지는 방문·테마·시간·입력·탭·화면 폭·네트워크·이전 결말에 완료 런·보존 정책·최고 점수·기억 조각을 더한 14개 사실마다 참/거짓/오염 문장을 정의하고, 세션 시드로 이 중 몇 개를 결합해 판정 대상을 만들었습니다(`createFactCatalog`/`createSessionClaims`). SIGNAL STRIKE로 재설계하며 판정 대상 자체가 텍스트 주장에서 색·기호 신호로 바뀌어 이 14개 사실 카탈로그와 결합 로직은 더 이상 필요하지 않아 `game-logic.js`에서 제거했습니다. 대신 "결정적 로컬 규칙"이라는 원칙은 §4 "SIGNAL STRIKE 반응형 판정"의 세 escalation 곡선(경과 시간만의 순수 함수)으로 이어집니다.
 
 ### 캐릭터 이미지 프롬프트
 
@@ -347,4 +371,4 @@ npm run docs:pdf
 
 `npm test`는 20개 게임 규칙·쿠키 직렬화 테스트를 실행합니다. `npm run build`는 GitHub Pages에 배포할 `dist/` 정적 파일을 생성합니다.
 
-> `scripts/record-game.mjs`(`npm run record`)는 이전 SIGNAL LOCK 화면 구조(`#statement-board`, `.statement-chip` 등)를 자동으로 조작하도록 작성되어, SIGNAL TRIAGE 재설계로 해당 DOM 요소가 제거되면서 이미 실행할 수 없는 상태였습니다. 이번 터미널 이동+도킹 재설계로 화면 구조가 다시 한 번 바뀌어(고정 세션 카드 하나 → 터미널 룸 + 도킹된 카드) 여전히 실행할 수 없습니다. 두 재설계 모두 검증은 이번 문서에 기록된 임시 Puppeteer 스모크 테스트로 대체했으며, 녹화 스크립트를 현재 화면 구조에 맞게 다시 쓰는 작업은 아직 진행하지 않았습니다. 제출용 플레이 영상은 이 자동 녹화 대신 실제 사람이 화면을 직접 녹화합니다(`제출_체크리스트.md` 참고).
+> `scripts/record-game.mjs`(`npm run record`)는 이전 SIGNAL LOCK 화면 구조(`#statement-board`, `.statement-chip` 등)를 자동으로 조작하도록 작성되어, SIGNAL TRIAGE 재설계로 해당 DOM 요소가 제거되면서 이미 실행할 수 없는 상태였습니다. 이후 이동+도킹 재설계(세션 카드 → 터미널 룸)와 SIGNAL STRIKE 재설계(터미널 룸 → 신호 슬롯 6개)를 거치며 화면 구조가 두 번 더 바뀌어 여전히 실행할 수 없습니다. 세 번의 재설계 모두 검증은 이번 문서에 기록된 임시 Puppeteer 스모크 테스트로 대체했으며, 녹화 스크립트를 현재 화면 구조에 맞게 다시 쓰는 작업은 진행하지 않았습니다 — 화면 구조가 이렇게 여러 번 바뀌는 개발 단계에서는 매번 녹화 스크립트를 유지보수하는 비용이 임시 스모크 테스트를 새로 짜는 비용보다 크다고 판단했습니다. 제출용 플레이 영상은 이 자동 녹화 대신 실제 사람이 화면을 직접 녹화합니다(`제출_체크리스트.md` 참고).
