@@ -397,9 +397,16 @@ function pickDialogueLine(dialogue) {
   return dialogue[Math.floor(Math.random() * dialogue.length)];
 }
 
+// States without their own commissioned portrait borrow the closest
+// existing one for the thumbnail image — only the label/caption/dialogue
+// need to be distinct for a reaction this specific.
+const PORTRAIT_STATE_ALIASES = {
+  "clutch-hit": "sync-linked",
+};
+
 function setMoriState(state, dialogueOverride = "") {
   const copy = MORI_STATES[state] ?? MORI_STATES.observing;
-  const portraitState = MORI_STATES[state] ? state : "observing";
+  const portraitState = MORI_STATES[state] ? (PORTRAIT_STATE_ALIASES[state] ?? state) : "observing";
   elements.screenStack.dataset.moriState = state;
   elements.moriPresence.dataset.characterState = state;
   elements.moriPresenceLabel.textContent = copy.caption;
