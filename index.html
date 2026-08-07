@@ -219,14 +219,6 @@
               </div>
             </header>
 
-            <details class="live-signal-panel" id="live-signal-panel" open>
-              <summary>
-                <span>LIVE SIGNAL</span>
-                <small>지금 이 브라우저의 실제 상태 · 주장의 각 줄과 비교하세요</small>
-              </summary>
-              <dl class="live-signal-grid" id="live-signal-grid" aria-label="현재 브라우저의 실제 상태값"></dl>
-            </details>
-
             <div class="integrity-line" aria-label="현재 감사 상태">
               <div class="integrity-status">
                 <span>MEMORY INTEGRITY</span>
@@ -297,20 +289,20 @@
 
             <div class="triage-lane" id="triage-lane" role="group" aria-label="지금 심사 중인 세션"></div>
             <p class="sr-only" id="triage-help">
-              제시된 주장의 각 줄을 위 LIVE SIGNAL 값과 대조한 뒤, VERIFIED·SPOOFED·CORRUPTED 구역을
+              왼쪽 MORI의 기록과 오른쪽 세션의 주장을 한 줄씩 비교한 뒤, 진짜·가짜·손상 버튼을
               클릭하거나 숫자 1·2·3 키를 눌러 판정하세요.
             </p>
             <div class="triage-zones" id="triage-zones">
               <button class="triage-zone" id="zone-true" data-zone="true" type="button">
-                <span>VERIFIED</span>
+                <span>진짜</span>
                 <kbd aria-hidden="true">1</kbd>
               </button>
               <button class="triage-zone" id="zone-false" data-zone="false" type="button">
-                <span>SPOOFED</span>
+                <span>가짜</span>
                 <kbd aria-hidden="true">2</kbd>
               </button>
               <button class="triage-zone" id="zone-corrupted" data-zone="corrupted" type="button">
-                <span>CORRUPTED</span>
+                <span>손상</span>
                 <kbd aria-hidden="true">3</kbd>
               </button>
             </div>
@@ -334,7 +326,7 @@
             </div>
 
             <div class="board-footer">
-              <p id="board-instruction">제시된 주장을 읽고 VERIFIED · SPOOFED · CORRUPTED로 판정하세요.</p>
+              <p id="board-instruction">MORI의 기록과 세션의 주장을 나란히 비교해 다른 한 줄을 찾으세요.</p>
               <output id="directive-readout">MORI REQUEST · WAITING</output>
             </div>
             <div class="round-resolution">

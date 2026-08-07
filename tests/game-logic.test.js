@@ -151,6 +151,7 @@ test("session claims combine distinct facts and carry exactly one false or corru
       for (const part of session.parts) {
         const fact = factsById.get(part.factId);
         assert.ok(fact);
+        assert.equal(part.trustedText, fact.truthText);
         for (const field of ["truthText", "lieText", "decoyText"]) {
           if (part.text === fact[field]) matchCounts[field] += 1;
         }

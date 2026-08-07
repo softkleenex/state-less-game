@@ -10,7 +10,7 @@ export const RUN_DIRECTIVE_BONUS = 600;
 
 export const PLAY_INSTRUCTION = {
   prompt: "이 세션은 정말 당신입니까?",
-  instruction: "제시된 주장을 읽고 VERIFIED · SPOOFED · CORRUPTED로 판정하세요.",
+  instruction: "MORI의 기록과 세션의 주장을 나란히 비교해 다른 한 줄을 찾으세요.",
 };
 
 export const WAVE_SESSION_TARGET = [4, 5, 6, 6, 7, 8];
@@ -326,16 +326,18 @@ function pickZone(random, corruptedChance) {
 
 // Builds one session's claim lines: `factsPerClaim` distinct facts, all stated
 // truthfully except for a single line that carries the session's verdict —
-// a lie for a spoofed session, an unreadable line for a corrupted one. Only
-// one line is ever wrong, so every line has to be checked against LIVE SIGNAL;
-// skimming for "the obviously fake part" doesn't work.
+// a lie for a spoofed session, an unreadable line for a corrupted one. Each
+// line also carries MORI's own trusted record (`trustedText`, always the
+// true statement) alongside the session's claim, so the two can be shown
+// side by side — skimming for "the obviously fake part" doesn't work, only
+// one line ever differs between the two records.
 function buildClaimParts(facts, zone, random) {
   const oddIndex = Math.floor(random() * facts.length);
   return facts.map((fact, index) => {
     const field = index !== oddIndex
       ? "truthText"
       : zone === "true" ? "truthText" : zone === "false" ? "lieText" : "decoyText";
-    return { factId: fact.id, text: fact[field] };
+    return { factId: fact.id, text: fact[field], trustedText: fact.truthText };
   });
 }
 

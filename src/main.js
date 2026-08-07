@@ -96,7 +96,6 @@ const elements = {
   deepVerifyButton: element("deep-verify-button"),
   deepVerifyKicker: element("deep-verify-kicker"),
   deepVerifyLabel: element("deep-verify-label"),
-  liveSignalGrid: element("live-signal-grid"),
   triageLane: element("triage-lane"),
   zoneTrue: element("zone-true"),
   zoneFalse: element("zone-false"),
@@ -293,9 +292,9 @@ const WAVE_MORI_DIALOGUE = [
 ];
 
 const ZONE_LABELS = {
-  true: "VERIFIED",
-  false: "SPOOFED",
-  corrupted: "CORRUPTED",
+  true: "진짜",
+  false: "가짜",
+  corrupted: "손상",
 };
 
 const WRONG_ZONE_HINT = {
@@ -624,23 +623,6 @@ function createDeck() {
   runtime.snapshot = getSnapshot();
   runtime.catalog = createFactCatalog(runtime.snapshot);
   runtime.seed = `${runtime.sessionId}:${runtime.memory.visits}:${runtime.memory.runs}:${runtime.stateRevision}`;
-  renderLiveSignalPanel();
-}
-
-function renderLiveSignalPanel() {
-  if (!runtime.catalog) return;
-  const fragment = document.createDocumentFragment();
-  for (const fact of runtime.catalog) {
-    const row = document.createElement("div");
-    row.className = "live-signal-row";
-    const dt = document.createElement("dt");
-    dt.textContent = fact.label;
-    const dd = document.createElement("dd");
-    dd.textContent = fact.value;
-    row.append(dt, dd);
-    fragment.append(row);
-  }
-  elements.liveSignalGrid.replaceChildren(fragment);
 }
 
 async function startGame(policy = null) {
@@ -901,19 +883,33 @@ function renderSessionCard(session) {
 
   const kicker = document.createElement("p");
   kicker.className = "session-card-kicker";
-  kicker.textContent = `SESSION ${String(runtime.sessionIndex + 1).padStart(2, "0")} / ${String(runtime.waveConfig.target).padStart(2, "0")}`;
+  kicker.textContent = `세션 ${String(runtime.sessionIndex + 1).padStart(2, "0")} / ${String(runtime.waveConfig.target).padStart(2, "0")}`;
+
+  const header = document.createElement("div");
+  header.className = "claim-row claim-header";
+  const headerLeft = document.createElement("span");
+  headerLeft.textContent = "MORI의 기록";
+  const headerRight = document.createElement("span");
+  headerRight.textContent = "이 세션의 주장";
+  header.append(headerLeft, headerRight);
 
   const list = document.createElement("ul");
   list.className = "claim-list";
-  list.setAttribute("aria-label", "이 세션의 주장");
+  list.setAttribute("aria-label", "MORI의 기록과 이 세션의 주장 비교");
   session.parts.forEach((part) => {
     const item = document.createElement("li");
     item.className = "claim-line";
-    item.textContent = part.text;
+    const trusted = document.createElement("span");
+    trusted.className = "claim-trusted";
+    trusted.textContent = part.trustedText;
+    const claim = document.createElement("span");
+    claim.className = "claim-own";
+    claim.textContent = part.text;
+    item.append(trusted, claim);
     list.append(item);
   });
 
-  card.append(kicker, list);
+  card.append(kicker, header, list);
   elements.triageLane.append(card);
 }
 
@@ -1135,7 +1131,7 @@ function startWave() {
     announce(`${runtime.roundIndex + 1}번째 웨이브 시작. ${PLAY_INSTRUCTION.instruction}`);
   }
   if (runtime.roundIndex === 0 && runtime.memory.runs === 0) {
-    showToast("각 줄을 위 LIVE SIGNAL 값과 하나씩 대조하세요. 한 줄이라도 다르면 SPOOFED, 읽을 수 없는 줄이 있으면 CORRUPTED입니다.");
+    showToast("왼쪽(MORI의 기록)과 오른쪽(세션의 주장)을 한 줄씩 비교하세요. 다른 줄이 있으면 가짜, 읽을 수 없으면 손상입니다.");
   }
   presentSession();
 }
