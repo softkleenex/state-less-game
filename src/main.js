@@ -98,6 +98,8 @@ const elements = {
   activeBuffs: element("active-buffs"),
   buffPickOverlay: element("buff-pick-overlay"),
   buffCards: [element("buff-card-0"), element("buff-card-1")],
+  coreOrb: element("core-orb"),
+  comboCallout: element("combo-callout"),
   waveProgress: element("wave-progress"),
   boardInstruction: element("board-instruction"),
   directiveReadout: element("directive-readout"),
@@ -620,6 +622,7 @@ function updateHud() {
     pip.classList.toggle("is-empty", index >= runtime.integrity);
   });
   elements.integrityPips.setAttribute("aria-label", `코어 무결성 ${runtime.integrity} / ${MAX_INTEGRITY}`);
+  elements.coreOrb.dataset.integrity = String(runtime.integrity);
 
   const comboBonus = clamp(runtime.combo, 0, 12) * 20;
   elements.syncValue.textContent = runtime.combo > 12 ? "×12+" : `×${runtime.combo}`;
@@ -793,6 +796,9 @@ async function startGame(policy = null) {
     slot.kind = null;
     updateSlotVisual(slot);
   });
+  elements.coreOrb.classList.remove("is-shattered");
+  elements.coreOrb.dataset.pulse = "";
+  elements.comboCallout.classList.remove("is-active");
 
   updateTelemetry();
   updateHud();
@@ -856,6 +862,34 @@ function settleSlot(slot, outcome, settleDelayMs) {
   }, settleDelayMs);
 }
 
+const COMBO_MILESTONES = [4, 8, 12];
+
+function pulseCoreOrb(kind) {
+  elements.coreOrb.dataset.pulse = "";
+  void elements.coreOrb.offsetWidth;
+  elements.coreOrb.dataset.pulse = kind;
+  window.setTimeout(() => {
+    if (elements.coreOrb.dataset.pulse === kind) elements.coreOrb.dataset.pulse = "";
+  }, kind === "hurt" ? 380 : 340);
+}
+
+function shakeSignalField() {
+  if (reducedMotionQuery.matches) return;
+  elements.signalField.classList.remove("is-shaking");
+  void elements.signalField.offsetWidth;
+  elements.signalField.classList.add("is-shaking");
+  window.setTimeout(() => elements.signalField.classList.remove("is-shaking"), 280);
+}
+
+function maybeShowComboCallout(combo) {
+  if (!COMBO_MILESTONES.includes(combo)) return;
+  elements.comboCallout.textContent = `COMBO ×${combo}!`;
+  elements.comboCallout.classList.remove("is-active");
+  void elements.comboCallout.offsetWidth;
+  elements.comboCallout.classList.add("is-active");
+  audio.core();
+}
+
 function activateSlot(index) {
   if (runtime.mode !== "play" || runtime.locked) return;
   const slot = runtime.slots[index];
@@ -880,6 +914,8 @@ function activateSlot(index) {
     audio.correct(runtime.combo);
     pulseMoriState(runtime.combo >= 4 ? "sync-linked" : "answer-correct");
     settleSlot(slot, "hit", settleDelay);
+    pulseCoreOrb("hit");
+    maybeShowComboCallout(runtime.combo);
   } else {
     runtime.combo = 0;
     runtime.wrongClicks += 1;
@@ -889,11 +925,14 @@ function activateSlot(index) {
     audio.wrong();
     pulseMoriState("answer-wrong");
     settleSlot(slot, "wrong", settleDelay);
+    pulseCoreOrb("hurt");
+    shakeSignalField();
     announce(`오클릭. 진짜 신호를 정화했습니다. 코어 무결성 ${loss}칸 손실.`);
   }
 
   updateHud();
   if (runtime.integrity <= 0) {
+    elements.coreOrb.classList.add("is-shattered");
     finishRun();
   }
 }
@@ -1040,6 +1079,21 @@ function renderResultArchive(foundNewFragment) {
   return null;
 }
 
+function animateScoreCountUp(target, durationMs = 900) {
+  if (reducedMotionQuery.matches) {
+    elements.resultScore.textContent = formatScore(target);
+    return;
+  }
+  const start = performance.now();
+  function tick(now) {
+    const ratio = clamp01((now - start) / durationMs);
+    const eased = 1 - (1 - ratio) ** 3;
+    elements.resultScore.textContent = formatScore(Math.round(target * eased));
+    if (ratio < 1) window.requestAnimationFrame(tick);
+  }
+  window.requestAnimationFrame(tick);
+}
+
 async function finishRun() {
   cancelRunTimers();
   runtime.locked = true;
@@ -1080,6 +1134,10 @@ async function finishRun() {
     ? "ARCHIVE COMPLETE"
     : result.ending === "verified" ? "RUN COMPLETE" : "CORE BREACHED";
   elements.resultGlyph.textContent = result.rank;
+  elements.resultGlyph.dataset.rank = result.rank;
+  elements.resultGlyph.classList.remove("is-revealed");
+  void elements.resultGlyph.offsetWidth;
+  elements.resultGlyph.classList.add("is-revealed");
   elements.resultHeading.textContent = result.title;
   if (completedNow) {
     elements.resultMessage.textContent = `${result.message} 마지막 기억 조각과 MORI의 최종 기록을 복구했습니다.`;
@@ -1090,7 +1148,7 @@ async function finishRun() {
   } else {
     elements.resultMessage.textContent = `${result.message} 이번 런에서는 새 기억 조각을 얻지 못했습니다.`;
   }
-  elements.resultScore.textContent = formatScore(runtime.score);
+  animateScoreCountUp(runtime.score);
   elements.resultRank.textContent = result.rank;
   elements.resultTruth.textContent = String(runtime.purges);
   elements.resultFragments.textContent = `${runtime.pendingFragments}/${MAX_MEMORY_FRAGMENTS}`;
