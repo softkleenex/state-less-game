@@ -184,7 +184,7 @@
               <div class="round-heading-copy">
                 <span class="micro-label" id="round-kicker">SIGNAL STRIKE</span>
                 <h2 id="round-heading">가짜 신호만 재빨리 정화하세요.</h2>
-                <p class="mori-dialogue">
+                <p class="mori-dialogue" id="mori-dialogue-line">
                   <span aria-hidden="true">MORI //</span>
                   <span id="mori-dialogue">신호가 들어오기 시작했어. 가짜만 지워.</span>
                 </p>
@@ -302,6 +302,26 @@
                   </button>
                 </div>
               </div>
+              <div class="tutorial-overlay" id="tutorial-overlay" role="group" aria-label="플레이 방법 안내" hidden>
+                <p class="tutorial-heading">첫 런이네. 이것만 기억해.</p>
+                <div class="tutorial-examples">
+                  <div class="tutorial-example">
+                    <span class="tutorial-icon tutorial-icon-fake" aria-hidden="true">✕</span>
+                    <strong>가짜(rose)</strong>
+                    <span>클릭하거나 번호 키로 지워</span>
+                  </div>
+                  <div class="tutorial-example">
+                    <span class="tutorial-icon tutorial-icon-genuine" aria-hidden="true">◆</span>
+                    <strong>진짜(cyan)</strong>
+                    <span>그대로 놔둬, 건드리면 코어가 아파</span>
+                  </div>
+                </div>
+                <p class="tutorial-copy" id="tutorial-copy"></p>
+                <button class="primary-button tutorial-start-button" id="tutorial-start-button" type="button">
+                  <span>알겠어, 시작할게</span>
+                  <span aria-hidden="true">↗</span>
+                </button>
+              </div>
               <button class="signal-slot" id="slot-0" type="button" data-slot-index="0" data-state="idle" style="--sx:18; --sy:26;">
                 <span class="signal-ring" aria-hidden="true"></span>
                 <span class="signal-icon" aria-hidden="true"></span>
@@ -362,6 +382,7 @@
               <span id="result-mori-dialogue">약속대로 내 기록 하나를 줄게. 다음에도 잊지 마.</span>
             </p>
             <p class="screen-copy" id="result-message"></p>
+            <p class="result-recap" id="result-recap" hidden></p>
 
             <p class="mission-brief result-directive" id="result-directive" data-state="pending" role="status">
               <span class="mission-label">MORI REQUEST</span>

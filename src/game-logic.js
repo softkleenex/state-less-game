@@ -494,27 +494,57 @@ export function getElapsedRatio(elapsedMs, durationMs = RUN_DURATION_MS) {
   return clamp(elapsedMs / durationMs, 0, 1);
 }
 
+// Escalation ramp shape: a raw linear ratio hits the same difficulty at 10s
+// that it used to hit at 10s, which a first-time player felt as "too fast,
+// too soon." Raising the ratio to a power >1 leaves both endpoints
+// unchanged (0 and 1 map to themselves) but bends the curve so the early
+// game stays close to the easy starting values for longer, then catches up
+// with a steeper climb in the back half — same difficulty at 0s and 60s,
+// gentler on the way there.
+const ESCALATION_EASE_POWER = 1.5;
+
+function easeEscalationRatio(elapsedMs, durationMs) {
+  return getElapsedRatio(elapsedMs, durationMs) ** ESCALATION_EASE_POWER;
+}
+
 // The three escalation curves below are the entire difficulty design of a
 // run: signals arrive faster, expire sooner, and more of them are live at
 // once as the 60-second clock runs out. Nothing else changes shape — there
 // is no new "kind" of round, only more pressure on the same reflex.
 export function getSpawnIntervalMs(elapsedMs, durationMs = RUN_DURATION_MS) {
-  const ratio = getElapsedRatio(elapsedMs, durationMs);
+  const ratio = easeEscalationRatio(elapsedMs, durationMs);
   return lerp(SPAWN_INTERVAL_RANGE_MS[0], SPAWN_INTERVAL_RANGE_MS[1], ratio);
 }
 
 export function getSignalLifespanMs(elapsedMs, durationMs = RUN_DURATION_MS) {
-  const ratio = getElapsedRatio(elapsedMs, durationMs);
+  const ratio = easeEscalationRatio(elapsedMs, durationMs);
   return lerp(SIGNAL_LIFESPAN_RANGE_MS[0], SIGNAL_LIFESPAN_RANGE_MS[1], ratio);
 }
 
 export function getMaxConcurrentSignals(elapsedMs, durationMs = RUN_DURATION_MS) {
-  const ratio = getElapsedRatio(elapsedMs, durationMs);
+  const ratio = easeEscalationRatio(elapsedMs, durationMs);
   return clamp(
     Math.round(lerp(MAX_CONCURRENT_RANGE[0], MAX_CONCURRENT_RANGE[1], ratio)),
     1,
     SLOT_COUNT,
   );
+}
+
+export const ADAPTIVE_METER_RANGE = 6;
+export const ADAPTIVE_DIFFICULTY_STRENGTH = 0.12;
+export const ADAPTIVE_METER_HIT_DELTA = 1;
+export const ADAPTIVE_METER_MISS_DELTA = -2;
+
+// A small hidden "how's this player doing right now" meter, separate from
+// the fixed 60s escalation curve above. It moves +1 per purge and -2 per
+// mistake (wrong click or missed fake), so three mistakes in a row bottoms
+// it out but recovering takes six clean purges — easing off is quicker than
+// ramping back up, which is the forgiving direction on purpose. The meter
+// only ever nudges spawn rate/signal lifespan by up to ±12% on top of the
+// escalation curve; it never overrides it.
+export function getAdaptiveDifficultyScale(meter) {
+  const clamped = clamp(meter, -ADAPTIVE_METER_RANGE, ADAPTIVE_METER_RANGE);
+  return 1 - (clamped / ADAPTIVE_METER_RANGE) * ADAPTIVE_DIFFICULTY_STRENGTH;
 }
 
 export function pickSignalKind(random = Math.random, genuineChance = GENUINE_CHANCE) {

@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  ADAPTIVE_METER_RANGE,
   BUFF_CHOICES_PER_PICK,
   BUFF_DEFINITIONS,
   BUFF_PICK_END_BUFFER_MS,
@@ -16,6 +17,7 @@ import {
   WRONG_CLICK_LOSS_DEEP_VERIFY,
   awardMemoryFragment,
   createRandom,
+  getAdaptiveDifficultyScale,
   getArchiveLensCharges,
   getBuffPickTriggers,
   getFragmentReward,
@@ -67,6 +69,21 @@ test("spawn interval and signal lifespan shrink while concurrency grows across t
   // Values past the run duration clamp instead of continuing to escalate.
   assert.equal(getSpawnIntervalMs(RUN_DURATION_MS * 2), late.interval);
   assert.equal(getMaxConcurrentSignals(-100), early.concurrent);
+});
+
+test("early-game escalation eases in instead of ramping linearly from the first second", () => {
+  const start = getSpawnIntervalMs(0);
+  const end = getSpawnIntervalMs(RUN_DURATION_MS);
+  const naiveLinearAt10s = start + (end - start) * (10_000 / RUN_DURATION_MS);
+  assert.ok(
+    getSpawnIntervalMs(10_000) > naiveLinearAt10s,
+    "10s in should still sit closer to the easy start than a straight-line ramp would allow",
+  );
+  assert.equal(
+    getMaxConcurrentSignals(10_000),
+    getMaxConcurrentSignals(0),
+    "max concurrent signals should still be at its floor a few seconds into the run",
+  );
 });
 
 test("signal kind sampling matches the configured genuine ratio", () => {
@@ -139,6 +156,15 @@ test("buff picks repeat on a cadence for the whole run instead of stopping after
     assert.ok(buff.description.length > 0);
     assert.ok(buff.effects && typeof buff.effects === "object");
   }
+});
+
+test("adaptive difficulty eases off after mistakes and tightens after a hot streak, within a bounded range", () => {
+  assert.equal(getAdaptiveDifficultyScale(0), 1);
+  assert.ok(getAdaptiveDifficultyScale(ADAPTIVE_METER_RANGE) < 1, "a hot streak should shorten spawn/lifespan (harder)");
+  assert.ok(getAdaptiveDifficultyScale(-ADAPTIVE_METER_RANGE) > 1, "a rough patch should lengthen spawn/lifespan (easier)");
+  // out-of-range meters clamp instead of scaling difficulty without bound
+  assert.equal(getAdaptiveDifficultyScale(ADAPTIVE_METER_RANGE * 3), getAdaptiveDifficultyScale(ADAPTIVE_METER_RANGE));
+  assert.equal(getAdaptiveDifficultyScale(-ADAPTIVE_METER_RANGE * 3), getAdaptiveDifficultyScale(-ADAPTIVE_METER_RANGE));
 });
 
 test("locked buffs only join the pool once enough memory fragments are recovered", () => {

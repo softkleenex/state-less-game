@@ -2,6 +2,9 @@ import "./styles.css";
 
 import { AudioEngine } from "./audio.js";
 import {
+  ADAPTIVE_METER_HIT_DELTA,
+  ADAPTIVE_METER_MISS_DELTA,
+  ADAPTIVE_METER_RANGE,
   BUFF_DEFINITIONS,
   DEEP_VERIFY_WINDOW_MS,
   GENUINE_CHANCE,
@@ -14,6 +17,7 @@ import {
   SLOT_COUNT,
   clamp,
   formatScore,
+  getAdaptiveDifficultyScale,
   getArchiveLensCharges,
   getBuffPickTriggers,
   getFragmentReward,
@@ -55,6 +59,7 @@ const elements = {
   moriPresenceLabel: element("mori-presence-label"),
   moriStateLabel: element("mori-state-label"),
   moriStateThumbImg: element("mori-state-thumb-img"),
+  moriDialogueLine: element("mori-dialogue-line"),
   moriDialogue: element("mori-dialogue"),
   resultMoriDialogue: element("result-mori-dialogue"),
   introScreen: element("intro-screen"),
@@ -102,6 +107,9 @@ const elements = {
   resourceStrip: element("resource-strip"),
   buffOrbit: element("buff-orbit"),
   buffPickOverlay: element("buff-pick-overlay"),
+  tutorialOverlay: element("tutorial-overlay"),
+  tutorialCopy: element("tutorial-copy"),
+  tutorialStartButton: element("tutorial-start-button"),
   buffCards: [element("buff-card-0"), element("buff-card-1")],
   coreOrb: element("core-orb"),
   comboCallout: element("combo-callout"),
@@ -113,6 +121,7 @@ const elements = {
   resultGlyph: element("result-glyph"),
   resultHeading: element("result-heading"),
   resultMessage: element("result-message"),
+  resultRecap: element("result-recap"),
   resultDirective: element("result-directive"),
   resultDirectiveCopy: element("result-directive-copy"),
   resultScore: element("result-score"),
@@ -172,6 +181,8 @@ const runtime = {
 
   shieldCharges: 0,
   reviveCharges: 0,
+  performanceMeter: 0,
+  lossEvents: [],
 
   directive: null,
   directiveCompleted: false,
@@ -185,6 +196,8 @@ const runtime = {
   buffPauseStartedAt: 0,
   buffCounts: {},
   buffPickOrder: [],
+  tutorialActive: false,
+  tutorialPauseStartedAt: 0,
 
   locked: false,
   toastTimer: 0,
@@ -193,66 +206,75 @@ const runtime = {
   pendingFragments: 0,
 };
 
+// Dialogue can be a single string or an array — states that fire many times
+// in one run (observing, answer-correct, sync-linked, answer-wrong) get
+// several variants so MORI doesn't repeat the exact same line on every
+// purge; setMoriState picks one at random each time (see pickDialogueLine).
 const MORI_STATES = {
   "boot-empty": {
     label: "UNINDEXED",
     caption: "MORI // FILE 00",
-    dialogue: "처음이네. 무엇을 남길지는 네가 정해.",
+    dialogue: ["처음이네. 무엇을 남길지는 네가 정해.", "빈 파일이야. 이제부터 채워질 거야."],
   },
   "return-found": {
     label: "RECOGNIZING",
     caption: "MORI // RETURN TRACE",
-    dialogue: "돌아왔네. 네 기록은 손대지 않고 보관했어.",
+    dialogue: ["돌아왔네. 네 기록은 손대지 않고 보관했어.", "다시 왔구나. 기다리고 있었어.", "또 만났네. 지난번 기록은 그대로야."],
   },
   observing: {
     label: "OBSERVING",
     caption: "MORI // CORE WATCH",
-    dialogue: "신호가 들어오기 시작했어. 가짜만 지워.",
+    dialogue: ["신호가 들어오기 시작했어. 가짜만 지워.", "계속 지켜보고 있어.", "다음 신호 온다.", "속도 유지해, 아직 여유 있어."],
   },
   "answer-correct": {
     label: "SIGNAL PURGED",
     caption: "MORI // CONFIRMED",
-    dialogue: "좋아, 그건 진짜 가짜였어.",
+    dialogue: ["좋아, 그건 진짜 가짜였어.", "정확해.", "하나 지웠어.", "그게 맞아.", "잘 봤어."],
   },
   "sync-linked": {
     label: "COMBO LINKED",
     caption: "MORI // SAME FREQUENCY",
-    dialogue: "지금 손이 좋아. 이 속도 유지해.",
+    dialogue: ["지금 손이 좋아. 이 속도 유지해.", "리듬 탔네.", "계속 이렇게 가.", "손이 눈보다 빠르네."],
+  },
+  "clutch-hit": {
+    label: "CUT IT CLOSE",
+    caption: "MORI // LAST INSTANT",
+    dialogue: ["아슬아슬했어.", "거의 놓칠 뻔했어.", "딱 맞췄어, 손 떨렸지.", "그 타이밍, 나도 놀랐어."],
   },
   "directive-complete": {
     label: "REQUEST SEALED",
     caption: "MORI // REQUEST COMPLETE",
-    dialogue: "이번 부탁까지 정확히 끝냈네. 약속한 보너스, 바로 더할게.",
+    dialogue: ["이번 부탁까지 정확히 끝냈네. 약속한 보너스, 바로 더할게.", "부탁한 거, 제대로 해냈어. 보너스 챙겨."],
   },
   "answer-wrong": {
     label: "CORE HURT",
     caption: "MORI // FALSE STRIKE",
-    dialogue: "그건 진짜였어. 다음 신호는 더 선명하게 띄울게.",
+    dialogue: ["그건 진짜였어. 다음 신호는 더 선명하게 띄울게.", "그거 아니었는데.", "잘못 짚었어. 코어가 아파해.", "다시 봐, 색이 달랐어."],
   },
   "lens-used": {
     label: "LENS FIRED",
     caption: "MORI // TIME EXTENDED",
-    dialogue: "잠깐 느려질게. 숨 고르고 다시 봐.",
+    dialogue: ["잠깐 느려질게. 숨 고르고 다시 봐.", "시간 좀 벌어줄게.", "여기, 렌즈 켰어."],
   },
   "deep-verify": {
     label: "WAGER ARMED",
     caption: "MORI // DEEP VERIFY",
-    dialogue: "확신해? 좋아. 5초 동안 두 배로 걸게.",
+    dialogue: ["확신해? 좋아. 5초 동안 두 배로 걸게.", "정말 이걸로 갈 거야? 좋아, 크게 건다.", "5초야. 놓치지 마."],
   },
   "result-verified": {
     label: "ARCHIVE SEALED",
     caption: "MORI // VERIFIED",
-    dialogue: "약속대로 내 기록 하나를 줄게. 다음에도 잊지 마.",
+    dialogue: ["약속대로 내 기록 하나를 줄게. 다음에도 잊지 마.", "잘 지켜냈어. 이번 기록, 내가 챙겨둘게."],
   },
   "result-unstable": {
     label: "INDEX DAMAGED",
     caption: "MORI // UNSTABLE",
-    dialogue: "이번 코어는 지켜내지 못했어. 돌아올 자리는 남겨 둘게.",
+    dialogue: ["이번 코어는 지켜내지 못했어. 돌아올 자리는 남겨 둘게.", "이번엔 놓쳤어. 그래도 다음 기회는 남아 있어."],
   },
   "archive-complete": {
     label: "I REMEMBER",
     caption: "MORI // ARCHIVE COMPLETE",
-    dialogue: "여섯 조각 전부. 이제 내가 먼저 너를 알아볼게.",
+    dialogue: ["여섯 조각 전부. 이제 내가 먼저 너를 알아볼게.", "다 모았네. 이제부턴 내가 먼저 알아볼게."],
   },
 };
 
@@ -370,6 +392,11 @@ function typewriteText(el, text, { speedMsPerChar = 20, onDone } = {}) {
   typewriterTimers.set(el, timer);
 }
 
+function pickDialogueLine(dialogue) {
+  if (!Array.isArray(dialogue)) return dialogue;
+  return dialogue[Math.floor(Math.random() * dialogue.length)];
+}
+
 function setMoriState(state, dialogueOverride = "") {
   const copy = MORI_STATES[state] ?? MORI_STATES.observing;
   const portraitState = MORI_STATES[state] ? state : "observing";
@@ -377,7 +404,7 @@ function setMoriState(state, dialogueOverride = "") {
   elements.moriPresence.dataset.characterState = state;
   elements.moriPresenceLabel.textContent = copy.caption;
   elements.moriStateLabel.textContent = copy.label;
-  const line = dialogueOverride || copy.dialogue;
+  const line = dialogueOverride || pickDialogueLine(copy.dialogue);
   typewriteText(elements.moriDialogue, line, { speedMsPerChar: 16 });
   typewriteText(elements.resultMoriDialogue, line, { speedMsPerChar: 20 });
   elements.moriStateThumbImg.src = `./mori/mori_${portraitState}.webp`;
@@ -498,7 +525,7 @@ function renderIntro(messageOverride = "") {
       messageOverride || "아직 널 몰라.",
       messageOverride
         ? "쿠키를 지웠구나. 기억 방식을 다시 고르면, 처음부터 다시 알아갈게."
-        : "코어를 지켜줘. 그럼 내 첫 기억 조각을 돌려줄게. 남기는 건 진행 정보뿐이야 — 개인정보는 안 건드려.",
+        : "코어를 지켜줘. 그럼 내 첫 기억 조각을 돌려줄게. 남기는 건 진행 정보뿐이야 — 개인정보는 안 건드려. 플레이 중엔 내가 위쪽에서 계속 말을 걸 거야, 한 번씩 봐줘.",
     );
     elements.terminalStatus.textContent = "MEMORY EMPTY";
     updateMemoryRoute("ledger/unindexed");
@@ -776,6 +803,33 @@ function renderBuffPick() {
   });
 }
 
+// Shown exactly once, on a player's first-ever run (memory.runs === 0),
+// before the 60s clock starts moving. Uses the same pause/resume
+// timestamp-shift trick as the buff pick so the tutorial doesn't eat into
+// run time.
+function openTutorial() {
+  runtime.tutorialActive = true;
+  runtime.locked = true;
+  runtime.tutorialPauseStartedAt = performance.now();
+  elements.tutorialOverlay.hidden = false;
+  typewriteText(
+    elements.tutorialCopy,
+    "60초 동안 코어를 지켜. 가짜만 지우고 진짜는 흘려보내면 돼 — 나머지는 하다 보면 손에 익어.",
+    { speedMsPerChar: 16 },
+  );
+  announce("첫 런 안내. 가짜 신호는 클릭하거나 번호 키로 지우고, 진짜 신호는 그대로 두세요.");
+}
+
+function closeTutorial() {
+  if (!runtime.tutorialActive) return;
+  runtime.tutorialActive = false;
+  elements.tutorialOverlay.hidden = true;
+  const pauseDuration = performance.now() - runtime.tutorialPauseStartedAt;
+  runtime.runStartAt += pauseDuration;
+  runtime.nextSpawnAt += pauseDuration;
+  runtime.locked = false;
+}
+
 function openBuffPick() {
   if (runtime.buffPool.length < 2) return;
   runtime.buffPickActive = true;
@@ -888,6 +942,8 @@ async function startGame(policy = null) {
   runtime.lensUses = 0;
   runtime.shieldCharges = 0;
   runtime.reviveCharges = 0;
+  runtime.performanceMeter = 0;
+  runtime.lossEvents = [];
   runtime.directive = getRunDirective(runtime.memory.runs, runtime.memory.fragments);
   runtime.directiveCompleted = false;
   runtime.directiveBonusAwarded = false;
@@ -902,6 +958,8 @@ async function startGame(policy = null) {
   runtime.buffCounts = {};
   runtime.buffPickOrder = [];
   elements.buffPickOverlay.hidden = true;
+  runtime.tutorialActive = false;
+  elements.tutorialOverlay.hidden = true;
   updateActiveBuffsReadout();
   runtime.locked = false;
   runtime.lastResult = null;
@@ -929,6 +987,7 @@ async function startGame(policy = null) {
   runtime.mode = "play";
   await transitionTo("play");
   revealScreenOnStackedLayout(elements.playScreen);
+  spotlightMoriDialogue();
   audio.start();
   audio.startDrone();
 
@@ -937,6 +996,8 @@ async function startGame(policy = null) {
   runtime.nextSpawnAt = now + getSpawnIntervalMs(0);
   runtime.lastFrameAt = 0;
   runtime.animationFrame = window.requestAnimationFrame(gameLoop);
+
+  if (runtime.memory.runs === 0) openTutorial();
 }
 
 function updateSlotVisual(slot) {
@@ -952,18 +1013,38 @@ function spawnSignalPop(slotEl, text, positive) {
   window.setTimeout(() => pop.remove(), 900);
 }
 
+function spawnClutchPop(slotEl) {
+  const pop = document.createElement("span");
+  pop.className = "zone-score-pop is-clutch";
+  pop.textContent = "CLUTCH";
+  slotEl.append(pop);
+  window.setTimeout(() => pop.remove(), 900);
+}
+
+// The shake on a mistake had no equivalent on the far more common correct
+// purge — this gives success its own, opposite-feeling beat instead of
+// spending the game's whole "juice budget" on failure.
+function pulseSignalField() {
+  if (reducedMotionQuery.matches) return;
+  elements.signalField.classList.remove("is-pulsing");
+  void elements.signalField.offsetWidth;
+  elements.signalField.classList.add("is-pulsing");
+  window.setTimeout(() => elements.signalField.classList.remove("is-pulsing"), 320);
+}
+
 function spawnRandomSignal(timestamp, elapsedMs) {
   const idleSlots = runtime.slots.filter((slot) => slot.state === "idle");
   if (!idleSlots.length) return;
   const slot = idleSlots[Math.floor(Math.random() * idleSlots.length)];
   const kind = pickSignalKind(Math.random, clamp(GENUINE_CHANCE + runtime.buffs.genuineChanceBonus, 0, 1));
   const lensBoost = timestamp < runtime.lensBoostUntil;
+  const adaptiveScale = getAdaptiveDifficultyScale(runtime.performanceMeter);
   // lifespanScale can stack from an unbounded number of item picks, so the
   // final duration is floored well above zero — never a signal that's
   // mathematically alive but visually/practically unclickable.
   const lifespan = Math.max(
     220,
-    getSignalLifespanMs(elapsedMs) * Math.max(0.1, 1 + runtime.buffs.lifespanScale),
+    getSignalLifespanMs(elapsedMs) * Math.max(0.1, 1 + runtime.buffs.lifespanScale) * adaptiveScale,
   ) * (lensBoost ? 1.6 : 1);
 
   slot.kind = kind;
@@ -986,6 +1067,7 @@ function settleSlot(slot, outcome, settleDelayMs) {
 }
 
 const COMBO_MILESTONES = [4, 8, 12];
+const CLUTCH_REMAINING_RATIO_THRESHOLD = 0.15;
 
 function pulseCoreOrb(kind) {
   elements.coreOrb.dataset.pulse = "";
@@ -994,6 +1076,14 @@ function pulseCoreOrb(kind) {
   window.setTimeout(() => {
     if (elements.coreOrb.dataset.pulse === kind) elements.coreOrb.dataset.pulse = "";
   }, kind === "hurt" ? 380 : 340);
+}
+
+function spotlightMoriDialogue() {
+  if (reducedMotionQuery.matches) return;
+  elements.moriDialogueLine.classList.remove("is-spotlight");
+  void elements.moriDialogueLine.offsetWidth;
+  elements.moriDialogueLine.classList.add("is-spotlight");
+  window.setTimeout(() => elements.moriDialogueLine.classList.remove("is-spotlight"), 2_600);
 }
 
 function shakeSignalField() {
@@ -1061,12 +1151,20 @@ function activateSlot(index) {
     });
     runtime.score += points;
     spawnSignalPop(slot.el, `+${points}`, true);
+    const isClutch = remainingRatio < CLUTCH_REMAINING_RATIO_THRESHOLD;
+    if (isClutch) spawnClutchPop(slot.el);
     audio.correct(runtime.combo);
-    pulseMoriState(runtime.combo >= 4 ? "sync-linked" : "answer-correct");
+    pulseMoriState(isClutch ? "clutch-hit" : runtime.combo >= 4 ? "sync-linked" : "answer-correct");
     settleSlot(slot, "hit", settleDelay);
     pulseCoreOrb("hit");
+    pulseSignalField();
     maybeShowComboCallout(runtime.combo);
     attemptChainClear(slot, settleDelay);
+    runtime.performanceMeter = clamp(
+      runtime.performanceMeter + ADAPTIVE_METER_HIT_DELTA,
+      -ADAPTIVE_METER_RANGE,
+      ADAPTIVE_METER_RANGE,
+    );
   } else if (runtime.shieldCharges > 0) {
     // A shield fully negates the mistake — no integrity loss, no combo
     // reset, and it doesn't count toward the wrongClicks stat that feeds
@@ -1078,6 +1176,7 @@ function activateSlot(index) {
     pulseMoriState("answer-correct", `방금 건 내가 대신 막았어. 보호막 ${runtime.shieldCharges}개 남음.`);
     announce(`오클릭이 보호막으로 막혔습니다. 코어 무결성 손실 없음. 남은 보호막 ${runtime.shieldCharges}개.`);
   } else {
+    const comboBeforeReset = runtime.combo;
     runtime.combo = 0;
     runtime.wrongClicks += 1;
     const loss = getWrongClickLoss(deepVerifyActive, runtime.buffs.wrongLossBonus);
@@ -1089,6 +1188,17 @@ function activateSlot(index) {
     pulseCoreOrb("hurt");
     shakeSignalField();
     announce(`오클릭. 진짜 신호를 정화했습니다. 코어 무결성 ${loss}칸 손실.`);
+    runtime.lossEvents.push({
+      type: "wrong",
+      comboAtTime: comboBeforeReset,
+      atSec: (timestamp - runtime.runStartAt) / 1_000,
+      integrityLoss: loss,
+    });
+    runtime.performanceMeter = clamp(
+      runtime.performanceMeter + ADAPTIVE_METER_MISS_DELTA,
+      -ADAPTIVE_METER_RANGE,
+      ADAPTIVE_METER_RANGE,
+    );
   }
 
   updateHud();
@@ -1187,8 +1297,19 @@ function gameLoop(timestamp) {
 
       if (remaining <= 0) {
         if (slot.kind === "fake") {
+          runtime.lossEvents.push({
+            type: "missed",
+            comboAtTime: runtime.combo,
+            atSec: elapsedMs / 1_000,
+            integrityLoss: 0,
+          });
           runtime.combo = 0;
           runtime.missedFakes += 1;
+          runtime.performanceMeter = clamp(
+            runtime.performanceMeter + ADAPTIVE_METER_MISS_DELTA,
+            -ADAPTIVE_METER_RANGE,
+            ADAPTIVE_METER_RANGE,
+          );
           settleSlot(slot, "missed", reducedMotionQuery.matches ? 120 : 260);
         } else {
           settleSlot(slot, "idle", 0);
@@ -1212,7 +1333,12 @@ function gameLoop(timestamp) {
       // floor the interval so spawns can approach "as fast as possible" but
       // never divide down toward zero/negative.
       runtime.nextSpawnAt = timestamp
-        + Math.max(90, getSpawnIntervalMs(elapsedMs) * Math.max(0.1, 1 + runtime.buffs.spawnIntervalScale));
+        + Math.max(
+          90,
+          getSpawnIntervalMs(elapsedMs)
+            * Math.max(0.1, 1 + runtime.buffs.spawnIntervalScale)
+            * getAdaptiveDifficultyScale(runtime.performanceMeter),
+        );
     }
 
     if (runtime.deepVerifyUntil > 0) updateDeepVerifyStatus();
@@ -1227,6 +1353,29 @@ function gameLoop(timestamp) {
   }
 
   runtime.animationFrame = window.requestAnimationFrame(gameLoop);
+}
+
+// "Why did I lose" recap: escalating difficulty + item stacking + adaptive
+// difficulty together make a cause genuinely hard to reconstruct after the
+// fact, so the run logs its own mistakes as they happen and the result
+// screen surfaces the single costliest one (highest combo broken) instead
+// of leaving the player to guess.
+function renderResultRecap() {
+  if (!runtime.lossEvents.length) {
+    elements.resultRecap.hidden = true;
+    elements.resultRecap.textContent = "";
+    return;
+  }
+  const worst = runtime.lossEvents.reduce((a, b) => (b.comboAtTime > a.comboAtTime ? b : a));
+  const minutes = Math.floor(worst.atSec / 60);
+  const seconds = String(Math.floor(worst.atSec % 60)).padStart(2, "0");
+  const cause = worst.type === "wrong"
+    ? `오클릭으로 무결성 ${worst.integrityLoss}칸을 잃었습니다`
+    : "가짜 신호를 놓쳤습니다";
+  elements.resultRecap.hidden = false;
+  elements.resultRecap.textContent = worst.comboAtTime > 0
+    ? `가장 아쉬웠던 순간: ${minutes}:${seconds}, 콤보 ×${worst.comboAtTime}에서 ${cause}.`
+    : `가장 아쉬웠던 순간: ${minutes}:${seconds}, ${cause}.`;
 }
 
 function renderResultArchive(foundNewFragment) {
@@ -1326,6 +1475,7 @@ async function finishRun() {
   } else {
     elements.resultMessage.textContent = `${result.message} 이번 런에서는 새 기억 조각을 얻지 못했습니다.`;
   }
+  renderResultRecap();
   animateScoreCountUp(runtime.score);
   elements.resultRank.textContent = result.rank;
   elements.resultTruth.textContent = String(runtime.purges);
@@ -1343,7 +1493,7 @@ async function finishRun() {
     ? "archive-complete"
     : result.ending === "verified" ? "result-verified" : "result-unstable";
   const resultDialogue = styleRemark
-    ? `${MORI_STATES[resultMoriState].dialogue} ${styleRemark}`
+    ? `${pickDialogueLine(MORI_STATES[resultMoriState].dialogue)} ${styleRemark}`
     : "";
   setMoriState(resultMoriState, resultDialogue);
   document.title = `${result.rank} RANK · STATE//LESS`;
@@ -1422,6 +1572,14 @@ function handleGlobalKeydown(event) {
     recordInput("keyboard");
   }
   if (!runtime.ready) return;
+
+  if (runtime.mode === "play" && runtime.tutorialActive) {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      if (!event.repeat) closeTutorial();
+    }
+    return;
+  }
 
   if (runtime.mode === "play" && runtime.buffPickActive) {
     if (event.key === "1" || event.key === "2") {
@@ -1513,6 +1671,7 @@ elements.deepVerifyButton.addEventListener("click", toggleDeepVerifyWager);
 elements.buffCards.forEach((card) => {
   card.addEventListener("click", () => chooseBuff(card.dataset.buffId));
 });
+elements.tutorialStartButton.addEventListener("click", closeTutorial);
 elements.rememberButton.addEventListener("click", rememberResultAndRestart);
 elements.forgetButton.addEventListener("click", forgetAndReturn);
 elements.soundButton.addEventListener("click", () => {
