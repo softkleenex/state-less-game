@@ -287,9 +287,44 @@
 
             <output class="wave-progress" id="wave-progress" aria-live="polite">정답 0 / 0 · 오답 0 · 놓침 0</output>
 
+            <div
+              class="terminal-room"
+              id="terminal-room"
+              role="group"
+              aria-label="터미널 룸. 방향키로 이동하거나, 터미널을 클릭·탭해 이동합니다."
+            >
+              <div class="operator-avatar" id="operator-avatar" aria-hidden="true"></div>
+              <button class="terminal-node" id="terminal-0" type="button" data-terminal-index="0" data-state="idle" style="--tx:16; --ty:24;">
+                <span class="terminal-ring" aria-hidden="true"></span>
+                <span class="terminal-icon" aria-hidden="true">▣</span>
+                <span class="sr-only">터미널 1</span>
+              </button>
+              <button class="terminal-node" id="terminal-1" type="button" data-terminal-index="1" data-state="idle" style="--tx:50; --ty:14;">
+                <span class="terminal-ring" aria-hidden="true"></span>
+                <span class="terminal-icon" aria-hidden="true">▣</span>
+                <span class="sr-only">터미널 2</span>
+              </button>
+              <button class="terminal-node" id="terminal-2" type="button" data-terminal-index="2" data-state="idle" style="--tx:84; --ty:24;">
+                <span class="terminal-ring" aria-hidden="true"></span>
+                <span class="terminal-icon" aria-hidden="true">▣</span>
+                <span class="sr-only">터미널 3</span>
+              </button>
+              <button class="terminal-node" id="terminal-3" type="button" data-terminal-index="3" data-state="idle" style="--tx:24; --ty:82;">
+                <span class="terminal-ring" aria-hidden="true"></span>
+                <span class="terminal-icon" aria-hidden="true">▣</span>
+                <span class="sr-only">터미널 4</span>
+              </button>
+              <button class="terminal-node" id="terminal-4" type="button" data-terminal-index="4" data-state="idle" style="--tx:76; --ty:82;">
+                <span class="terminal-ring" aria-hidden="true"></span>
+                <span class="terminal-icon" aria-hidden="true">▣</span>
+                <span class="sr-only">터미널 5</span>
+              </button>
+            </div>
+
             <div class="triage-lane" id="triage-lane" role="group" aria-label="지금 심사 중인 세션"></div>
             <p class="sr-only" id="triage-help">
-              왼쪽 MORI의 기록과 오른쪽 세션의 주장을 한 줄씩 비교한 뒤, 진짜·가짜·손상 버튼을
+              방향키로 이동해 켜진 터미널에 도착하면 세션 카드가 열립니다. 왼쪽
+              MORI의 기록과 오른쪽 세션의 주장을 한 줄씩 비교한 뒤, 진짜·가짜·손상 버튼을
               클릭하거나 숫자 1·2·3 키를 눌러 판정하세요.
             </p>
             <div class="triage-zones" id="triage-zones">

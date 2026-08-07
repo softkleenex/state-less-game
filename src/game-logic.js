@@ -10,13 +10,15 @@ export const RUN_DIRECTIVE_BONUS = 600;
 
 export const PLAY_INSTRUCTION = {
   prompt: "이 세션은 정말 당신입니까?",
-  instruction: "MORI의 기록과 세션의 주장을 나란히 비교해 다른 한 줄을 찾으세요.",
+  instruction: "방향키로 켜진 터미널에 도착해 MORI의 기록과 세션의 주장을 비교해 다른 한 줄을 찾으세요.",
 };
 
 export const WAVE_SESSION_TARGET = [4, 5, 6, 6, 7, 8];
 export const WAVE_FACTS_PER_CLAIM = [2, 2, 3, 3, 3, 3];
-export const WAVE_SESSION_TIMER_MS = [13_000, 11_500, 10_000, 9_000, 8_000, 7_000];
+export const WAVE_SESSION_TIMER_MS = [15_000, 14_000, 13_000, 12_500, 12_000, 11_500];
 export const WAVE_CORRUPTED_CHANCE = [0, 0.15, 0.2, 0.25, 0.3, 0.35];
+export const WAVE_CONCURRENT_TERMINALS = [1, 2, 2, 3, 3, 4];
+export const TERMINAL_COUNT = 5;
 
 const RUN_DIRECTIVES = [
   {
@@ -316,6 +318,7 @@ export function getWaveConfig(waveIndex) {
     factsPerClaim: WAVE_FACTS_PER_CLAIM[index],
     timerMs: WAVE_SESSION_TIMER_MS[index],
     corruptedChance: WAVE_CORRUPTED_CHANCE[index],
+    concurrent: Math.min(TERMINAL_COUNT, WAVE_CONCURRENT_TERMINALS[index]),
   };
 }
 

@@ -9,6 +9,7 @@ import {
   SYNC_RECOVERY_STREAK,
   TOTAL_ROUNDS,
   VERIFIED_CORRECT_REQUIRED,
+  clamp,
   createFactCatalog,
   createSessionClaims,
   formatScore,
@@ -96,6 +97,9 @@ const elements = {
   deepVerifyButton: element("deep-verify-button"),
   deepVerifyKicker: element("deep-verify-kicker"),
   deepVerifyLabel: element("deep-verify-label"),
+  terminalRoom: element("terminal-room"),
+  operatorAvatar: element("operator-avatar"),
+  terminalNodes: [...document.querySelectorAll(".terminal-node")],
   triageLane: element("triage-lane"),
   zoneTrue: element("zone-true"),
   zoneFalse: element("zone-false"),
@@ -175,10 +179,13 @@ const runtime = {
   locked: false,
   waveConfig: null,
   waveSessions: [],
-  sessionIndex: 0,
   currentSession: null,
-  sessionStartedAt: 0,
-  sessionDeadline: 0,
+  terminals: [],
+  spawnQueue: [],
+  dockedIndex: -1,
+  moveTargetIndex: -1,
+  avatar: { x: 0, y: 0, vx: 0, vy: 0 },
+  keysDown: new Set(),
   waveCorrect: 0,
   waveWrong: 0,
   waveMissed: 0,
@@ -306,6 +313,39 @@ const WRONG_ZONE_HINT = {
 elements.memoryButtons.forEach((button) => {
   button.disabled = true;
 });
+
+const AVATAR_MAX_SPEED = 220;
+const AVATAR_ACCEL = 1_500;
+const AVATAR_FRICTION = 2_000;
+const AVATAR_MARGIN = 12;
+const DOCK_RADIUS = 34;
+
+function initTerminalRoom() {
+  runtime.terminals = elements.terminalNodes.map((el, index) => ({
+    index,
+    tx: Number.parseFloat(el.style.getPropertyValue("--tx")) || 50,
+    ty: Number.parseFloat(el.style.getPropertyValue("--ty")) || 50,
+    el,
+    ring: el.querySelector(".terminal-ring"),
+    state: "idle",
+    session: null,
+    deadline: 0,
+    totalMs: 0,
+  }));
+
+  elements.terminalNodes.forEach((node, index) => {
+    node.addEventListener("click", () => setMoveTarget(index));
+  });
+}
+
+function setMoveTarget(index) {
+  if (runtime.mode !== "play" || runtime.locked) return;
+  const terminal = runtime.terminals[index];
+  if (!terminal || (terminal.state !== "pending" && terminal.state !== "active")) return;
+  runtime.moveTargetIndex = index;
+}
+
+initTerminalRoom();
 
 function createSessionId() {
   const buffer = new Uint32Array(1);
@@ -595,10 +635,20 @@ function showRoundImpact(state, label, value, detail, autoHideMs = 0) {
 
 const clamp01 = (value) => Math.min(1, Math.max(0, value));
 
-function updateSessionTime() {
-  const totalMs = runtime.waveConfig?.timerMs ?? 1;
-  const remainingMs = Math.max(0, runtime.sessionDeadline - performance.now());
-  const critical = remainingMs / totalMs <= 0.3;
+function getRoomRect() {
+  return elements.terminalRoom.getBoundingClientRect();
+}
+
+function getTerminalPixelPos(terminal, roomRect) {
+  return {
+    x: (terminal.tx / 100) * roomRect.width,
+    y: (terminal.ty / 100) * roomRect.height,
+  };
+}
+
+function renderTimeHud(remainingMs, totalMs) {
+  const totalSafe = totalMs > 0 ? totalMs : 1;
+  const critical = remainingMs / totalSafe <= 0.3;
   elements.screenStack.dataset.timePressure = String(critical);
 
   const clockTenths = Math.ceil(remainingMs / 100);
@@ -607,7 +657,7 @@ function updateSessionTime() {
   runtime.clockTenths = clockTenths;
   const seconds = (clockTenths / 10).toFixed(1);
   elements.roundTime.textContent = seconds;
-  elements.roundTimeBlock.setAttribute("aria-label", `남은 시간 ${seconds}초`);
+  elements.roundTimeBlock.setAttribute("aria-label", `가장 급한 터미널 남은 시간 ${seconds}초`);
   elements.roundTimeBlock.dataset.state = critical ? "critical" : "active";
 }
 
@@ -875,15 +925,23 @@ function clearSessionCard() {
   elements.triageLane.replaceChildren();
 }
 
+function renderEmptyTriageLane() {
+  const empty = document.createElement("p");
+  empty.className = "triage-lane-empty";
+  empty.textContent = "켜진 터미널로 이동하세요.";
+  elements.triageLane.replaceChildren(empty);
+}
+
 function renderSessionCard(session) {
   clearSessionCard();
   const card = document.createElement("div");
   card.className = "session-card";
   card.style.setProperty("--session-progress", "0");
 
+  const resolvedCount = runtime.waveCorrect + runtime.waveWrong + runtime.waveMissed;
   const kicker = document.createElement("p");
   kicker.className = "session-card-kicker";
-  kicker.textContent = `세션 ${String(runtime.sessionIndex + 1).padStart(2, "0")} / ${String(runtime.waveConfig.target).padStart(2, "0")}`;
+  kicker.textContent = `세션 ${String(resolvedCount + 1).padStart(2, "0")} / ${String(runtime.waveConfig.target).padStart(2, "0")}`;
 
   const header = document.createElement("div");
   header.className = "claim-row claim-header";
@@ -956,17 +1014,16 @@ function mistakeTypeFor(sessionZone, judgedZone) {
 
 function judgeSession(zone) {
   if (runtime.mode !== "play" || runtime.locked) return;
+  const terminal = runtime.terminals[runtime.dockedIndex];
   const session = runtime.currentSession;
-  if (!session) return;
+  if (!terminal || !session) return;
 
-  window.cancelAnimationFrame(runtime.animationFrame);
   const deepVerify = runtime.deepVerifyArmed;
   runtime.deepVerifyArmed = false;
   if (deepVerify) runtime.deepVerifyUsedWaveIndex = runtime.roundIndex;
 
   const correct = zone === session.zone;
-  const elapsed = performance.now() - runtime.sessionStartedAt;
-  const remainingRatio = 1 - clamp01(elapsed / runtime.waveConfig.timerMs);
+  const remainingRatio = clamp01(Math.max(0, terminal.deadline - performance.now()) / terminal.totalMs);
 
   if (correct) {
     runtime.streak += 1;
@@ -995,29 +1052,279 @@ function judgeSession(zone) {
     announce(`${ZONE_LABELS[zone]} 판정은 오답입니다. 기억 무결성 ${integrityLoss}칸 손실.`);
   }
 
-  advanceSessionOrConclude();
+  runtime.dockedIndex = -1;
+  runtime.currentSession = null;
+  renderEmptyTriageLane();
+  settleTerminal(terminal, correct ? "correct" : "wrong");
 }
 
-function expireSession() {
+function updateTerminalVisual(terminal) {
+  terminal.el.dataset.state = terminal.state;
+}
+
+function spawnNextTerminal(terminalIndex) {
+  const terminal = runtime.terminals[terminalIndex];
+  if (!terminal || terminal.state !== "idle") return;
+  const session = runtime.spawnQueue.shift();
+  if (!session) return;
+  terminal.session = session;
+  terminal.state = "pending";
+  terminal.totalMs = runtime.waveConfig.timerMs;
+  terminal.deadline = performance.now() + terminal.totalMs;
+  updateTerminalVisual(terminal);
+  audio.warning();
+  announce(`터미널 ${terminal.index + 1}번이 켜졌습니다. 이동해서 도착하면 세션을 판정할 수 있습니다.`);
+}
+
+function checkWaveCompletion() {
+  if (runtime.mode !== "play" || runtime.locked) return;
+  const queueEmpty = runtime.spawnQueue.length === 0;
+  const allIdle = runtime.terminals.every((terminal) => terminal.state === "idle");
+  if (queueEmpty && allIdle) {
+    concludeWave("correct");
+  }
+}
+
+function settleTerminal(terminal, outcome) {
+  terminal.session = null;
+  terminal.state = outcome === "correct"
+    ? "resolved-correct"
+    : outcome === "wrong" ? "resolved-wrong" : "idle";
+  updateTerminalVisual(terminal);
+
+  if (runtime.integrity <= 0) {
+    concludeWave("wrong");
+    return;
+  }
+
+  const settleDelay = reducedMotionQuery.matches ? 120 : 380;
+  window.setTimeout(() => {
+    if (runtime.mode !== "play") return;
+    terminal.state = "idle";
+    updateTerminalVisual(terminal);
+    spawnNextTerminal(terminal.index);
+    checkWaveCompletion();
+  }, settleDelay);
+}
+
+function handleTerminalTimeout(terminal) {
   runtime.streak = 0;
   runtime.waveMissed += 1;
   runtime.missedCount += 1;
   updateScoreAndIntegrity();
   updateWaveProgress();
-  advanceSessionOrConclude();
+  if (runtime.dockedIndex === terminal.index) {
+    runtime.dockedIndex = -1;
+    runtime.currentSession = null;
+    renderEmptyTriageLane();
+  }
+  settleTerminal(terminal, "timeout");
 }
 
-function advanceSessionOrConclude() {
-  if (runtime.integrity <= 0) {
-    concludeWave("wrong");
+function dockTerminal(index) {
+  if (runtime.dockedIndex === index) return;
+  undockTerminal();
+  const terminal = runtime.terminals[index];
+  terminal.state = "active";
+  updateTerminalVisual(terminal);
+  runtime.dockedIndex = index;
+  runtime.moveTargetIndex = -1;
+  runtime.currentSession = terminal.session;
+  renderSessionCard(terminal.session);
+  announce("세션 카드가 열렸습니다. 진짜, 가짜, 손상 중 하나로 판정하세요.");
+}
+
+function undockTerminal() {
+  if (runtime.dockedIndex < 0) return;
+  const terminal = runtime.terminals[runtime.dockedIndex];
+  if (terminal && terminal.state === "active") {
+    terminal.state = "pending";
+    updateTerminalVisual(terminal);
+  }
+  runtime.dockedIndex = -1;
+  runtime.currentSession = null;
+  renderEmptyTriageLane();
+}
+
+function updateDocking(roomRect) {
+  let nearestIndex = -1;
+  let nearestDist = DOCK_RADIUS;
+  runtime.terminals.forEach((terminal) => {
+    if (terminal.state !== "pending" && terminal.state !== "active") return;
+    const pos = getTerminalPixelPos(terminal, roomRect);
+    const dist = Math.hypot(pos.x - runtime.avatar.x, pos.y - runtime.avatar.y);
+    if (dist <= nearestDist) {
+      nearestDist = dist;
+      nearestIndex = terminal.index;
+    }
+  });
+
+  if (nearestIndex >= 0 && nearestIndex !== runtime.dockedIndex) {
+    dockTerminal(nearestIndex);
+  } else if (nearestIndex < 0 && runtime.dockedIndex >= 0) {
+    undockTerminal();
+  }
+}
+
+function updateAvatarPosition(dt, roomRect) {
+  const left = runtime.keysDown.has("ArrowLeft");
+  const right = runtime.keysDown.has("ArrowRight");
+  const up = runtime.keysDown.has("ArrowUp");
+  const down = runtime.keysDown.has("ArrowDown");
+  let dirX = (right ? 1 : 0) - (left ? 1 : 0);
+  let dirY = (down ? 1 : 0) - (up ? 1 : 0);
+  const manualInput = dirX !== 0 || dirY !== 0;
+
+  if (manualInput) {
+    runtime.moveTargetIndex = -1;
+    const length = Math.hypot(dirX, dirY) || 1;
+    dirX /= length;
+    dirY /= length;
+    runtime.avatar.vx += dirX * AVATAR_ACCEL * dt;
+    runtime.avatar.vy += dirY * AVATAR_ACCEL * dt;
+  } else if (runtime.moveTargetIndex >= 0 && runtime.terminals[runtime.moveTargetIndex]) {
+    const terminal = runtime.terminals[runtime.moveTargetIndex];
+    if (terminal.state !== "pending" && terminal.state !== "active") {
+      runtime.moveTargetIndex = -1;
+    } else {
+      const pos = getTerminalPixelPos(terminal, roomRect);
+      const dx = pos.x - runtime.avatar.x;
+      const dy = pos.y - runtime.avatar.y;
+      const dist = Math.hypot(dx, dy);
+      if (dist < 6) {
+        runtime.moveTargetIndex = -1;
+      } else {
+        runtime.avatar.vx += (dx / dist) * AVATAR_ACCEL * dt;
+        runtime.avatar.vy += (dy / dist) * AVATAR_ACCEL * dt;
+      }
+    }
+  } else {
+    const speed = Math.hypot(runtime.avatar.vx, runtime.avatar.vy);
+    if (speed > 0) {
+      const drop = Math.min(speed, AVATAR_FRICTION * dt);
+      const scale = (speed - drop) / speed;
+      runtime.avatar.vx *= scale;
+      runtime.avatar.vy *= scale;
+    }
+  }
+
+  const speed = Math.hypot(runtime.avatar.vx, runtime.avatar.vy);
+  if (speed > AVATAR_MAX_SPEED) {
+    const scale = AVATAR_MAX_SPEED / speed;
+    runtime.avatar.vx *= scale;
+    runtime.avatar.vy *= scale;
+  }
+
+  runtime.avatar.x = clamp(
+    runtime.avatar.x + runtime.avatar.vx * dt,
+    AVATAR_MARGIN,
+    Math.max(AVATAR_MARGIN, roomRect.width - AVATAR_MARGIN),
+  );
+  runtime.avatar.y = clamp(
+    runtime.avatar.y + runtime.avatar.vy * dt,
+    AVATAR_MARGIN,
+    Math.max(AVATAR_MARGIN, roomRect.height - AVATAR_MARGIN),
+  );
+
+  elements.operatorAvatar.style.left = `${runtime.avatar.x}px`;
+  elements.operatorAvatar.style.top = `${runtime.avatar.y}px`;
+}
+
+function updateTerminalTimers(timestamp) {
+  let soonestRemaining = Infinity;
+  let soonestTotal = 1;
+  let dockedRatioPercent = null;
+
+  runtime.terminals.forEach((terminal) => {
+    if (terminal.state !== "pending" && terminal.state !== "active") return;
+    const remaining = Math.max(0, terminal.deadline - timestamp);
+    const ratioPercent = terminal.totalMs > 0 ? (remaining / terminal.totalMs) * 100 : 0;
+    terminal.ring.style.setProperty("--time-left", String(ratioPercent));
+    if (terminal.state === "pending") {
+      terminal.el.dataset.urgent = String(ratioPercent < 30);
+    }
+
+    if (remaining < soonestRemaining) {
+      soonestRemaining = remaining;
+      soonestTotal = terminal.totalMs;
+    }
+    if (terminal.index === runtime.dockedIndex) {
+      dockedRatioPercent = ratioPercent;
+    }
+    if (remaining <= 0) {
+      handleTerminalTimeout(terminal);
+    }
+  });
+
+  if (dockedRatioPercent !== null) {
+    const card = elements.triageLane.querySelector(".session-card");
+    if (card) card.style.setProperty("--session-progress", String(100 - dockedRatioPercent));
+  }
+
+  if (Number.isFinite(soonestRemaining)) {
+    renderTimeHud(soonestRemaining, soonestTotal);
+  } else {
+    elements.roundTime.textContent = "--.-";
+    elements.screenStack.dataset.timePressure = "false";
+    runtime.clockTenths = -1;
+  }
+}
+
+function roomLoop(timestamp) {
+  if (runtime.mode !== "play") {
+    runtime.animationFrame = 0;
     return;
   }
-  runtime.sessionIndex += 1;
-  if (runtime.sessionIndex >= runtime.waveSessions.length) {
-    concludeWave("correct");
-    return;
+
+  const last = runtime.lastFrameAt || timestamp;
+  const dt = Math.min(0.05, Math.max(0, (timestamp - last) / 1_000));
+  runtime.lastFrameAt = timestamp;
+
+  if (!runtime.locked) {
+    const roomRect = getRoomRect();
+    updateAvatarPosition(dt, roomRect);
+    updateTerminalTimers(timestamp);
+    updateDocking(roomRect);
   }
-  presentSession();
+
+  runtime.animationFrame = window.requestAnimationFrame(roomLoop);
+}
+
+function startWaveRoom() {
+  runtime.spawnQueue = [...runtime.waveSessions];
+  runtime.dockedIndex = -1;
+  runtime.moveTargetIndex = -1;
+  runtime.currentSession = null;
+  renderEmptyTriageLane();
+
+  const roomRect = getRoomRect();
+  if (runtime.roundIndex === 0) {
+    runtime.avatar.x = roomRect.width / 2;
+    runtime.avatar.y = roomRect.height / 2;
+    runtime.avatar.vx = 0;
+    runtime.avatar.vy = 0;
+    elements.operatorAvatar.style.left = `${runtime.avatar.x}px`;
+    elements.operatorAvatar.style.top = `${runtime.avatar.y}px`;
+  }
+
+  runtime.terminals.forEach((terminal) => {
+    terminal.state = "idle";
+    terminal.session = null;
+    updateTerminalVisual(terminal);
+  });
+
+  const concurrent = Math.min(
+    runtime.waveConfig.concurrent,
+    runtime.terminals.length,
+    runtime.spawnQueue.length,
+  );
+  for (let index = 0; index < concurrent; index += 1) {
+    spawnNextTerminal(index);
+  }
+
+  runtime.lastFrameAt = 0;
+  window.cancelAnimationFrame(runtime.animationFrame);
+  runtime.animationFrame = window.requestAnimationFrame(roomLoop);
 }
 
 function useArchiveLens() {
@@ -1098,7 +1405,6 @@ function startWave() {
   runtime.locked = false;
   runtime.waveConfig = getWaveConfig(runtime.roundIndex);
   runtime.waveSessions = createSessionClaims(runtime.catalog, runtime.roundIndex, runtime.seed);
-  runtime.sessionIndex = 0;
   runtime.waveCorrect = 0;
   runtime.waveWrong = 0;
   runtime.waveMissed = 0;
@@ -1131,35 +1437,9 @@ function startWave() {
     announce(`${runtime.roundIndex + 1}번째 웨이브 시작. ${PLAY_INSTRUCTION.instruction}`);
   }
   if (runtime.roundIndex === 0 && runtime.memory.runs === 0) {
-    showToast("왼쪽(MORI의 기록)과 오른쪽(세션의 주장)을 한 줄씩 비교하세요. 다른 줄이 있으면 가짜, 읽을 수 없으면 손상입니다.");
+    showToast("방향키로 이동해 깜빡이는 터미널에 도착하세요. 여러 개가 동시에 켜지면 급한 쪽부터.");
   }
-  presentSession();
-}
-
-function presentSession() {
-  runtime.currentSession = runtime.waveSessions[runtime.sessionIndex];
-  runtime.sessionStartedAt = performance.now();
-  runtime.sessionDeadline = runtime.sessionStartedAt + runtime.waveConfig.timerMs;
-  runtime.clockTenths = -1;
-  renderSessionCard(runtime.currentSession);
-  updateSessionTime();
-  runtime.animationFrame = window.requestAnimationFrame(updateSessionFrame);
-}
-
-function updateSessionFrame(timestamp) {
-  if (runtime.mode !== "play" || runtime.locked) return;
-
-  const ratio = clamp01((timestamp - runtime.sessionStartedAt) / runtime.waveConfig.timerMs);
-  const card = elements.triageLane.querySelector(".session-card");
-  if (card) card.style.setProperty("--session-progress", String(ratio * 100));
-
-  updateSessionTime();
-
-  if (timestamp >= runtime.sessionDeadline) {
-    expireSession();
-    return;
-  }
-  runtime.animationFrame = window.requestAnimationFrame(updateSessionFrame);
+  startWaveRoom();
 }
 
 function concludeWave(outcome) {
@@ -1479,6 +1759,17 @@ function handleGlobalKeydown(event) {
   }
 
   if (runtime.mode === "play" && !runtime.locked) {
+    if (
+      event.key === "ArrowLeft"
+      || event.key === "ArrowRight"
+      || event.key === "ArrowUp"
+      || event.key === "ArrowDown"
+    ) {
+      event.preventDefault();
+      runtime.keysDown.add(event.key);
+      runtime.moveTargetIndex = -1;
+      return;
+    }
     if (event.key.toLowerCase() === "d") {
       event.preventDefault();
       if (!event.repeat) toggleDeepVerifyWager();
@@ -1557,6 +1848,12 @@ document.addEventListener("pointerdown", (event) => {
   if (event.isPrimary) recordInput("mouse");
 }, { capture: true });
 document.addEventListener("keydown", handleGlobalKeydown, { capture: true });
+document.addEventListener("keyup", (event) => {
+  runtime.keysDown.delete(event.key);
+}, { capture: true });
+window.addEventListener("blur", () => {
+  runtime.keysDown.clear();
+});
 
 elements.memoryButtons.forEach((button) => {
   button.addEventListener("click", () => startGame(button.dataset.memoryPolicy));
