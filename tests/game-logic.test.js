@@ -9,15 +9,14 @@ import {
   RUN_DIRECTIVE_BONUS,
   SYNC_RECOVERY_STREAK,
   TOTAL_ROUNDS,
-  WAVE_CHIP_TARGET,
   WAVE_CORRUPTED_CHANCE,
-  WAVE_MAX_CONCURRENT,
-  WAVE_SPAWN_INTERVAL_MS,
-  WAVE_TRAVEL_MS,
+  WAVE_FACTS_PER_CLAIM,
+  WAVE_SESSION_TARGET,
+  WAVE_SESSION_TIMER_MS,
   awardMemoryFragment,
-  createChipPool,
   createFactCatalog,
   createRandom,
+  createSessionClaims,
   getArchiveLensCharges,
   getAuditGateStatus,
   getDeepVerifyBonus,
@@ -30,8 +29,7 @@ import {
   getRunStyleTag,
   getSyncRecoveryIndex,
   getWaveConfig,
-  getWaveDurationMs,
-  getWrongAnswerIntegrityLoss,
+  getWrongJudgmentLoss,
   scoreCorrectAnswer,
   seedFromString,
 } from "../src/game-logic.js";
@@ -115,68 +113,79 @@ test("cookie progression facts keep distinct options at their storage caps", () 
 });
 
 test("wave config arrays are sized for all six waves and escalate monotonically", () => {
-  for (const array of [WAVE_CHIP_TARGET, WAVE_SPAWN_INTERVAL_MS, WAVE_TRAVEL_MS, WAVE_MAX_CONCURRENT, WAVE_CORRUPTED_CHANCE]) {
+  for (const array of [WAVE_SESSION_TARGET, WAVE_FACTS_PER_CLAIM, WAVE_SESSION_TIMER_MS, WAVE_CORRUPTED_CHANCE]) {
     assert.equal(array.length, TOTAL_ROUNDS);
   }
   for (let index = 1; index < TOTAL_ROUNDS; index += 1) {
-    assert.ok(WAVE_CHIP_TARGET[index] >= WAVE_CHIP_TARGET[index - 1]);
-    assert.ok(WAVE_SPAWN_INTERVAL_MS[index] <= WAVE_SPAWN_INTERVAL_MS[index - 1]);
-    assert.ok(WAVE_TRAVEL_MS[index] <= WAVE_TRAVEL_MS[index - 1]);
-    assert.ok(WAVE_MAX_CONCURRENT[index] >= WAVE_MAX_CONCURRENT[index - 1]);
+    assert.ok(WAVE_SESSION_TARGET[index] >= WAVE_SESSION_TARGET[index - 1]);
+    assert.ok(WAVE_FACTS_PER_CLAIM[index] >= WAVE_FACTS_PER_CLAIM[index - 1]);
+    assert.ok(WAVE_SESSION_TIMER_MS[index] <= WAVE_SESSION_TIMER_MS[index - 1]);
     assert.ok(WAVE_CORRUPTED_CHANCE[index] >= WAVE_CORRUPTED_CHANCE[index - 1]);
   }
 
   const config = getWaveConfig(2);
-  assert.equal(config.target, WAVE_CHIP_TARGET[2]);
-  assert.equal(config.spawnIntervalMs, WAVE_SPAWN_INTERVAL_MS[2]);
-  assert.equal(config.travelMs, WAVE_TRAVEL_MS[2]);
-  assert.equal(config.maxConcurrent, WAVE_MAX_CONCURRENT[2]);
+  assert.equal(config.target, WAVE_SESSION_TARGET[2]);
+  assert.equal(config.factsPerClaim, WAVE_FACTS_PER_CLAIM[2]);
+  assert.equal(config.timerMs, WAVE_SESSION_TIMER_MS[2]);
   assert.equal(config.corruptedChance, WAVE_CORRUPTED_CHANCE[2]);
 
-  assert.equal(getWaveConfig(-1).target, WAVE_CHIP_TARGET[0]);
-  assert.equal(getWaveConfig(999).target, WAVE_CHIP_TARGET.at(-1));
-
-  assert.equal(
-    getWaveDurationMs(0),
-    Math.round(WAVE_CHIP_TARGET[0] * WAVE_SPAWN_INTERVAL_MS[0] * 1.8),
-  );
+  assert.equal(getWaveConfig(-1).target, WAVE_SESSION_TARGET[0]);
+  assert.equal(getWaveConfig(999).target, WAVE_SESSION_TARGET.at(-1));
 });
 
-test("chip pool draws only from the fact catalog's truth/lie/decoy fields and is seed-reproducible", () => {
+test("session claims combine distinct facts and carry exactly one false or corrupted line, and are seed-reproducible", () => {
   const catalog = createFactCatalog(snapshot);
   const factsById = new Map(catalog.map((fact) => [fact.id, fact]));
 
   for (let waveIndex = 0; waveIndex < TOTAL_ROUNDS; waveIndex += 1) {
-    const pool = createChipPool(catalog, waveIndex, "seed-a");
-    assert.ok(pool.length > 0);
-    for (const chip of pool) {
-      assert.ok(["true", "false", "corrupted"].includes(chip.zone));
-      const fact = factsById.get(chip.factId);
-      assert.ok(fact);
-      const expectedText = { true: fact.truthText, false: fact.lieText, corrupted: fact.decoyText }[chip.zone];
-      assert.equal(chip.text, expectedText);
+    const { target, factsPerClaim } = getWaveConfig(waveIndex);
+    const sessions = createSessionClaims(catalog, waveIndex, "seed-a");
+    assert.equal(sessions.length, target);
+
+    for (const session of sessions) {
+      assert.ok(["true", "false", "corrupted"].includes(session.zone));
+      assert.equal(session.parts.length, factsPerClaim);
+      assert.equal(new Set(session.parts.map((part) => part.factId)).size, factsPerClaim);
+
+      const matchCounts = { truthText: 0, lieText: 0, decoyText: 0 };
+      for (const part of session.parts) {
+        const fact = factsById.get(part.factId);
+        assert.ok(fact);
+        for (const field of ["truthText", "lieText", "decoyText"]) {
+          if (part.text === fact[field]) matchCounts[field] += 1;
+        }
+      }
+      if (session.zone === "true") {
+        assert.equal(matchCounts.lieText, 0);
+        assert.equal(matchCounts.decoyText, 0);
+      } else if (session.zone === "false") {
+        assert.equal(matchCounts.lieText, 1);
+        assert.equal(matchCounts.decoyText, 0);
+      } else {
+        assert.equal(matchCounts.decoyText, 1);
+      }
     }
   }
 
   assert.deepEqual(
-    createChipPool(catalog, 3, "reproduce-me"),
-    createChipPool(catalog, 3, "reproduce-me"),
+    createSessionClaims(catalog, 3, "reproduce-me"),
+    createSessionClaims(catalog, 3, "reproduce-me"),
   );
   assert.notDeepEqual(
-    createChipPool(catalog, 3, "seed-a").map((chip) => chip.id),
-    createChipPool(catalog, 3, "seed-b").map((chip) => chip.id),
+    createSessionClaims(catalog, 3, "seed-a").map((session) => session.parts),
+    createSessionClaims(catalog, 3, "seed-b").map((session) => session.parts),
   );
 });
 
-test("corrupted chip chance rises across waves as configured", () => {
+test("corrupted session chance rises across waves as configured", () => {
   const catalog = createFactCatalog(snapshot);
   const sampleCorruptedRatio = (waveIndex) => {
     let corrupted = 0;
     let total = 0;
     for (let sample = 0; sample < 40; sample += 1) {
-      const pool = createChipPool(catalog, waveIndex, `sample-${sample}`);
-      corrupted += pool.filter((chip) => chip.zone === "corrupted").length;
-      total += pool.length;
+      const sessions = createSessionClaims(catalog, waveIndex, `sample-${sample}`);
+      corrupted += sessions.filter((session) => session.zone === "corrupted").length;
+      total += sessions.length;
     }
     return corrupted / total;
   };
@@ -196,8 +205,11 @@ test("deep verify adds a base wager and doubles an error's integrity loss", () =
   assert.equal(DEEP_VERIFY_BONUS, 350);
   assert.equal(DEEP_VERIFY_INTEGRITY_LOSS, 2);
   assert.equal(scoreCorrectAnswer(1, 1, true), 1_410);
-  assert.equal(getWrongAnswerIntegrityLoss(false), 1);
-  assert.equal(getWrongAnswerIntegrityLoss(true), 2);
+  assert.equal(getWrongJudgmentLoss("approved-spoofed"), 2);
+  assert.equal(getWrongJudgmentLoss("rejected-genuine"), 1);
+  assert.equal(getWrongJudgmentLoss("misjudged-corrupted"), 1);
+  assert.equal(getWrongJudgmentLoss("rejected-genuine", true), 2);
+  assert.equal(getWrongJudgmentLoss("approved-spoofed", true), 2);
 });
 
 test("the final core doubles only the last round's deep verify reward", () => {
@@ -348,13 +360,13 @@ test("legacy memories migrate safely and memory fragments stop at the collection
 });
 
 test("archive lens charges grow with recovered fragments and stop at three", () => {
-  assert.equal(getArchiveLensCharges(0), 1);
-  assert.equal(getArchiveLensCharges(1), 1);
-  assert.equal(getArchiveLensCharges(2), 2);
-  assert.equal(getArchiveLensCharges(3), 2);
+  assert.equal(getArchiveLensCharges(0), 2);
+  assert.equal(getArchiveLensCharges(1), 2);
+  assert.equal(getArchiveLensCharges(2), 3);
+  assert.equal(getArchiveLensCharges(3), 3);
   assert.equal(getArchiveLensCharges(4), 3);
   assert.equal(getArchiveLensCharges(MAX_MEMORY_FRAGMENTS), 3);
-  assert.equal(getArchiveLensCharges("invalid"), 1);
+  assert.equal(getArchiveLensCharges("invalid"), 2);
 });
 
 test("only a verified audit awards the next memory fragment", () => {

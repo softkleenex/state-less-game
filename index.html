@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta
       name="description"
-      content="브라우저 흔적을 해석하고 MORI의 기억 조각을 복구하는 상태 기반 메타 퍼즐 게임"
+      content="누군가 당신인 척 이 브라우저에 들어오려 한다. 세션 검증 AI MORI와 함께 실시간으로 진짜 흔적과 위조된 흔적을 가려내는 시그널 트리아지 게임"
     />
     <meta name="theme-color" content="#070a12" />
     <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
@@ -51,8 +51,9 @@
           <span>당신을<br />기억한다.</span>
         </h1>
         <p class="lede">
-          이 출처의 로컬 일지에서 깨어난 기억 사서 MORI. 브라우저가 남긴
-          흔적을 판독하고, 다음 방문까지 이어지는 여섯 장의 색인을 완성하세요.
+          이 출처에서 깨어난 세션 검증 AI MORI. 누군가 당신인 척 이 브라우저에
+          들어오려 합니다 — 진짜 흔적과 위조된 흔적을 실시간으로 가려내
+          여섯 번의 검증을 통과하세요.
         </p>
 
         <dl class="telemetry" id="telemetry-list" aria-label="현재 브라우저 텔레메트리">
@@ -123,11 +124,11 @@
             <div class="ai-orb" aria-hidden="true">
               <span></span><span></span><span></span>
             </div>
-            <p class="speaker-label">MORI / ARCHIVE KEEPER</p>
+            <p class="speaker-label">MORI / VERIFY DAEMON</p>
             <h2 id="intro-heading">아직 당신을 모릅니다.</h2>
             <p class="screen-copy" id="intro-message">
-              이 게임은 방문 횟수와 결말만 쿠키에 저장합니다. 추적 코드도,
-              개인정보도 없습니다.
+              진짜인지 증명하세요. 이 게임은 방문 횟수와 결말만 쿠키에
+              저장합니다. 추적 코드도, 개인정보도 없습니다.
             </p>
 
             <p class="mission-brief" id="mission-brief" data-state="next">
@@ -181,11 +182,11 @@
           <section class="screen game-screen" id="play-screen" aria-labelledby="round-heading" hidden>
             <header class="round-header">
               <div class="round-heading-copy">
-                <span class="micro-label" id="round-kicker">SIGNAL TRIAGE · WAVE 01/06</span>
-                <h2 id="round-heading">지금 진짜인 신호를 고르세요.</h2>
+                <span class="micro-label" id="round-kicker">SESSION AUDIT · WAVE 01/06</span>
+                <h2 id="round-heading">이 세션은 정말 당신입니까?</h2>
                 <p class="mori-dialogue">
                   <span aria-hidden="true">MORI //</span>
-                  <span id="mori-dialogue">신호는 솔직해. 해석하는 쪽이 자꾸 거짓말할 뿐이지.</span>
+                  <span id="mori-dialogue">세션이 들어오기 시작했어. 한 줄씩 놓치지 말고 봐.</span>
                 </p>
               </div>
               <div class="round-side">
@@ -221,7 +222,7 @@
             <details class="live-signal-panel" id="live-signal-panel" open>
               <summary>
                 <span>LIVE SIGNAL</span>
-                <small>지금 이 브라우저의 실제 상태 · 칩과 비교하세요</small>
+                <small>지금 이 브라우저의 실제 상태 · 주장의 각 줄과 비교하세요</small>
               </summary>
               <dl class="live-signal-grid" id="live-signal-grid" aria-label="현재 브라우저의 실제 상태값"></dl>
             </details>
@@ -263,13 +264,13 @@
                 <span class="lens-mark" aria-hidden="true">◇</span>
                 <span class="lens-copy">
                   <small>ARCHIVE LENS</small>
-                  <strong><span id="lens-count">01 / 01</span> · <span id="lens-state">READY</span></strong>
+                  <strong><span id="lens-count">02 / 02</span> · <span id="lens-state">READY</span></strong>
                 </span>
                 <kbd aria-hidden="true">F</kbd>
               </button>
             </div>
             <p class="sr-only" id="lens-help">
-              한 웨이브에 한 번, 런 전체 충전 하나를 사용해 신호 하나의 정답 구역을 밝힙니다.
+              한 웨이브에 한 번, 런 전체 충전 하나를 사용해 지금 세션의 실제 판정을 밝힙니다.
             </p>
 
             <button
@@ -283,29 +284,29 @@
               <span class="deep-verify-mark" aria-hidden="true">◆</span>
               <span class="deep-verify-copy">
                 <small id="deep-verify-kicker">OPTIONAL WAGER · DEEP VERIFY</small>
-                <strong id="deep-verify-label">OFF · 정답 +350 / 오답 무결성 -2 · 5초간 지속</strong>
+                <strong id="deep-verify-label">OFF · 정답 +350 / 오답 무결성 -2</strong>
               </span>
               <kbd aria-hidden="true">D</kbd>
             </button>
             <p class="sr-only" id="deep-verify-help">
-              웨이브당 한 번, 5초 동안 켤 수 있습니다. 그 동안 정답이면 추가 점수를 받고,
+              웨이브당 한 번, 다음 판정 하나에 걸 수 있습니다. 그 판정이 정답이면 추가 점수를 받고,
               오답이면 기억 무결성을 2칸 잃습니다. 무결성이 1칸이면 사용할 수 없습니다.
             </p>
 
             <output class="wave-progress" id="wave-progress" aria-live="polite">정답 0 / 0 · 오답 0 · 놓침 0</output>
 
-            <div class="triage-lane" id="triage-lane" role="group" aria-label="흐르는 증거 신호"></div>
+            <div class="triage-lane" id="triage-lane" role="group" aria-label="지금 심사 중인 세션"></div>
             <p class="sr-only" id="triage-help">
-              칩을 클릭하거나 화살표로 골라 선택한 뒤, TRUE·FALSE·CORRUPTED 구역을 클릭하거나
-              숫자 1·2·3 키를 눌러 분류하세요.
+              제시된 주장의 각 줄을 위 LIVE SIGNAL 값과 대조한 뒤, VERIFIED·SPOOFED·CORRUPTED 구역을
+              클릭하거나 숫자 1·2·3 키를 눌러 판정하세요.
             </p>
             <div class="triage-zones" id="triage-zones">
               <button class="triage-zone" id="zone-true" data-zone="true" type="button">
-                <span>TRUE</span>
+                <span>VERIFIED</span>
                 <kbd aria-hidden="true">1</kbd>
               </button>
               <button class="triage-zone" id="zone-false" data-zone="false" type="button">
-                <span>FALSE</span>
+                <span>SPOOFED</span>
                 <kbd aria-hidden="true">2</kbd>
               </button>
               <button class="triage-zone" id="zone-corrupted" data-zone="corrupted" type="button">
@@ -333,7 +334,7 @@
             </div>
 
             <div class="board-footer">
-              <p id="board-instruction">TRUE · FALSE · CORRUPTED 중 이 신호가 속한 구역으로 옮기세요.</p>
+              <p id="board-instruction">제시된 주장을 읽고 VERIFIED · SPOOFED · CORRUPTED로 판정하세요.</p>
               <output id="directive-readout">MORI REQUEST · WAITING</output>
             </div>
             <div class="round-resolution">

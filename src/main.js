@@ -3,15 +3,14 @@ import "./styles.css";
 import { AudioEngine } from "./audio.js";
 import {
   DEEP_VERIFY_BONUS,
-  DEEP_VERIFY_BURST_MS,
   MAX_INTEGRITY,
   MAX_MEMORY_FRAGMENTS,
   PLAY_INSTRUCTION,
   SYNC_RECOVERY_STREAK,
   TOTAL_ROUNDS,
   VERIFIED_CORRECT_REQUIRED,
-  createChipPool,
   createFactCatalog,
+  createSessionClaims,
   formatScore,
   getArchiveLensCharges,
   getAuditGateStatus,
@@ -25,8 +24,7 @@ import {
   getRunStyleTag,
   getSyncRecoveryIndex,
   getWaveConfig,
-  getWaveDurationMs,
-  getWrongAnswerIntegrityLoss,
+  getWrongJudgmentLoss,
   scoreCorrectAnswer,
 } from "./game-logic.js";
 import {
@@ -162,7 +160,7 @@ const runtime = {
   streak: 0,
   syncRecoveryUsed: false,
   deepVerifyBonus: DEEP_VERIFY_BONUS,
-  deepVerifyBurstUntil: 0,
+  deepVerifyArmed: false,
   deepVerifyUsedWaveIndex: -1,
   directive: null,
   directiveCompleted: false,
@@ -172,22 +170,19 @@ const runtime = {
   wrongCount: 0,
   missedCount: 0,
   outcomes: [],
-  lensCharges: 1,
+  lensCharges: 2,
   lensMaxCharges: 1,
   lensUsedRoundIndex: -1,
   locked: false,
   waveConfig: null,
-  waveChipPool: [],
-  waveChipCursor: 0,
+  waveSessions: [],
+  sessionIndex: 0,
+  currentSession: null,
+  sessionStartedAt: 0,
+  sessionDeadline: 0,
   waveCorrect: 0,
   waveWrong: 0,
   waveMissed: 0,
-  waveDeadline: 0,
-  nextSpawnAt: 0,
-  activeChips: new Map(),
-  selectedChipId: null,
-  lensRevealChipId: null,
-  triageFrame: 0,
   moriPulseTimer: 0,
   lastFrameAt: 0,
   animationFrame: 0,
@@ -197,7 +192,6 @@ const runtime = {
   resizeTimer: 0,
   lastResult: null,
   pendingFragments: 0,
-  pressureWarned: false,
   clockTenths: -1,
 };
 
@@ -290,17 +284,17 @@ const MORI_STATES = {
 };
 
 const WAVE_MORI_DIALOGUE = [
-  "신호가 흐르기 시작했어. 잡아서 제자리로 보내.",
-  "이제 두 개가 겹칠 거야. 눈을 두 군데에 둬.",
-  "오염된 신호도 섞여. 색이 다르면 의심해.",
-  "손이 바빠질 거야. 놓치는 것보다 잘못 넣는 게 더 아파.",
+  "세션이 들어오기 시작했어. 한 줄씩 놓치지 말고 봐.",
+  "이제 결합된 주장이 나올 거야. 한 줄이라도 다르면 전체가 위조야.",
+  "판독 불가한 줄도 섞여. 억지로 판단하지 말고 보류해.",
+  "시간이 짧아질 거야. 놓치는 것보다 잘못 승인하는 게 더 아파.",
   "거의 다 왔어. 속도보다 정확도.",
-  "마지막 코어야. 지금까지 중 제일 빨라.",
+  "마지막 코어야. 지금까지 중 가장 정교한 위장이 온다.",
 ];
 
 const ZONE_LABELS = {
-  true: "TRUE",
-  false: "FALSE",
+  true: "VERIFIED",
+  false: "SPOOFED",
   corrupted: "CORRUPTED",
 };
 
@@ -602,8 +596,12 @@ function showRoundImpact(state, label, value, detail, autoHideMs = 0) {
 
 const clamp01 = (value) => Math.min(1, Math.max(0, value));
 
-function updateWaveTime() {
-  const remainingMs = Math.max(0, runtime.waveDeadline - performance.now());
+function updateSessionTime() {
+  const totalMs = runtime.waveConfig?.timerMs ?? 1;
+  const remainingMs = Math.max(0, runtime.sessionDeadline - performance.now());
+  const critical = remainingMs / totalMs <= 0.3;
+  elements.screenStack.dataset.timePressure = String(critical);
+
   const clockTenths = Math.ceil(remainingMs / 100);
   if (clockTenths === runtime.clockTenths) return;
 
@@ -611,7 +609,7 @@ function updateWaveTime() {
   const seconds = (clockTenths / 10).toFixed(1);
   elements.roundTime.textContent = seconds;
   elements.roundTimeBlock.setAttribute("aria-label", `남은 시간 ${seconds}초`);
-  elements.roundTimeBlock.dataset.state = remainingMs <= 5_000 ? "critical" : "active";
+  elements.roundTimeBlock.dataset.state = critical ? "critical" : "active";
 }
 
 function advanceRound() {
@@ -663,7 +661,7 @@ async function startGame(policy = null) {
   runtime.correct = 0;
   runtime.streak = 0;
   runtime.syncRecoveryUsed = false;
-  runtime.deepVerifyBurstUntil = 0;
+  runtime.deepVerifyArmed = false;
   runtime.deepVerifyUsedWaveIndex = -1;
   runtime.deepVerifyBonus = DEEP_VERIFY_BONUS;
   runtime.directive = getRunDirective(runtime.memory.runs, runtime.memory.fragments);
@@ -685,7 +683,7 @@ async function startGame(policy = null) {
   updateScoreAndIntegrity();
   elements.terminalStatus.textContent = "AUDIT ACTIVE";
   elements.screenStack.dataset.finalRound = "false";
-  updateMemoryRoute("audit/round-01");
+  updateMemoryRoute("audit/wave-01");
   setMoriState("observing");
   document.title = "[1/6] STATE//LESS";
 
@@ -717,41 +715,36 @@ function updateLensStatus() {
   );
 }
 
-function isDeepVerifyBurstActive() {
-  return performance.now() < runtime.deepVerifyBurstUntil;
-}
-
 function updateDeepVerifyStatus() {
-  const burstActive = isDeepVerifyBurstActive();
+  const armed = runtime.deepVerifyArmed;
   const usedThisWave = runtime.deepVerifyUsedWaveIndex === runtime.roundIndex;
   const available = runtime.mode === "play"
     && !runtime.locked
-    && runtime.integrity > 1
     && !usedThisWave
-    && !burstActive;
+    && (armed || runtime.integrity > 1);
   const finalCore = runtime.roundIndex === TOTAL_ROUNDS - 1;
   const bonus = runtime.deepVerifyBonus;
 
   elements.deepVerifyButton.disabled = !available;
-  elements.deepVerifyButton.dataset.active = String(burstActive);
-  elements.deepVerifyButton.setAttribute("aria-pressed", String(burstActive));
-  elements.screenStack.dataset.deepVerify = String(burstActive);
+  elements.deepVerifyButton.dataset.active = String(armed);
+  elements.deepVerifyButton.setAttribute("aria-pressed", String(armed));
+  elements.screenStack.dataset.deepVerify = String(armed);
   elements.deepVerifyKicker.textContent = finalCore
     ? "FINAL WAGER · DEEP VERIFY ×2"
     : "OPTIONAL WAGER · DEEP VERIFY";
-  elements.deepVerifyLabel.textContent = burstActive
-    ? `ON · 정답 +${bonus} / 오답 무결성 -2`
+  elements.deepVerifyLabel.textContent = armed
+    ? `ON · 이번 판정 정답 +${bonus} / 오답 무결성 -2`
     : usedThisWave
       ? "SETTLED · 다음 웨이브에서 다시 사용"
       : runtime.integrity <= 1
         ? "LOCKED · 무결성 2칸 필요"
-        : `OFF · 정답 +${bonus} / 오답 무결성 -2 · ${Math.round(DEEP_VERIFY_BURST_MS / 1000)}초간 지속`;
+        : `OFF · 정답 +${bonus} / 오답 무결성 -2`;
   elements.deepVerifyButton.setAttribute(
     "aria-label",
-    burstActive
+    armed
       ? `DEEP VERIFY 켜짐. 정답 추가 ${bonus}점, 오답 기억 무결성 2칸 손실.`
       : available
-        ? `DEEP VERIFY 대기. 정답 추가 ${bonus}점, 오답 기억 무결성 2칸 손실. 단축키 D로 ${Math.round(DEEP_VERIFY_BURST_MS / 1000)}초간 켜기.`
+        ? `DEEP VERIFY 대기. 정답 추가 ${bonus}점, 오답 기억 무결성 2칸 손실. 단축키 D로 이번 판정에 걸기.`
         : usedThisWave
           ? "DEEP VERIFY 이번 웨이브에서 이미 사용했습니다. 다음 웨이브에서 다시 사용할 수 있습니다."
           : "DEEP VERIFY 잠김. 기억 무결성이 2칸 이상일 때 사용할 수 있습니다.",
@@ -815,7 +808,7 @@ function updateScoreAndIntegrity() {
   );
   const recoveryArmed = failedOutcomeExists && !runtime.syncRecoveryUsed;
   const recoveryRemaining = Math.max(0, SYNC_RECOVERY_STREAK - runtime.streak);
-  elements.syncValue.textContent = `×${runtime.streak}`;
+  elements.syncValue.textContent = runtime.streak > 5 ? "×5+" : `×${runtime.streak}`;
   elements.syncBonus.textContent = recoveryArmed
     ? `↺${recoveryRemaining} · +${String(syncBonus).padStart(3, "0")}`
     : runtime.syncRecoveryUsed
@@ -896,78 +889,32 @@ function updateDirectiveReadout() {
   );
 }
 
-function clearTriageLane() {
+function clearSessionCard() {
   elements.triageLane.replaceChildren();
-  runtime.activeChips.clear();
-  runtime.selectedChipId = null;
-  runtime.lensRevealChipId = null;
 }
 
-function pickFreeTrack() {
-  const usedTracks = new Set([...runtime.activeChips.values()].map((chip) => chip.track));
-  for (let track = 0; track < 3; track += 1) {
-    if (!usedTracks.has(track)) return track;
-  }
-  return Math.floor(Math.random() * 3);
-}
+function renderSessionCard(session) {
+  clearSessionCard();
+  const card = document.createElement("div");
+  card.className = "session-card";
+  card.style.setProperty("--session-progress", "0");
 
-function selectChip(chipId) {
-  if (!runtime.activeChips.has(chipId)) return;
-  runtime.selectedChipId = chipId;
-  runtime.activeChips.forEach((chip, id) => {
-    chip.el.classList.toggle("is-selected", id === chipId);
-  });
-}
+  const kicker = document.createElement("p");
+  kicker.className = "session-card-kicker";
+  kicker.textContent = `SESSION ${String(runtime.sessionIndex + 1).padStart(2, "0")} / ${String(runtime.waveConfig.target).padStart(2, "0")}`;
 
-function cycleChipSelection(direction) {
-  const ids = [...runtime.activeChips.keys()];
-  if (!ids.length) return;
-  const currentIndex = ids.indexOf(runtime.selectedChipId);
-  const nextIndex = currentIndex < 0
-    ? 0
-    : (currentIndex + direction + ids.length) % ids.length;
-  selectChip(ids[nextIndex]);
-  audio.navigate(nextIndex);
-}
-
-function removeChip(chipId) {
-  const chip = runtime.activeChips.get(chipId);
-  if (!chip) return;
-  chip.el.remove();
-  runtime.activeChips.delete(chipId);
-  if (runtime.selectedChipId === chipId) {
-    runtime.selectedChipId = null;
-    const [nextId] = runtime.activeChips.keys();
-    if (nextId) selectChip(nextId);
-  }
-}
-
-function spawnChip() {
-  if (runtime.waveChipCursor >= runtime.waveChipPool.length) return;
-  const def = runtime.waveChipPool[runtime.waveChipCursor];
-  runtime.waveChipCursor += 1;
-
-  const track = pickFreeTrack();
-  const el = document.createElement("button");
-  el.type = "button";
-  el.className = "triage-chip";
-  el.dataset.chipId = def.id;
-  el.dataset.track = String(track);
-  el.textContent = def.text;
-  el.setAttribute("aria-label", `증거 신호: ${def.text}`);
-  el.style.setProperty("--chip-track", String(track));
-  el.style.setProperty("--chip-progress", "0");
-  el.addEventListener("click", () => selectChip(def.id));
-  elements.triageLane.append(el);
-
-  runtime.activeChips.set(def.id, {
-    def,
-    el,
-    track,
-    spawnedAt: performance.now(),
+  const list = document.createElement("ul");
+  list.className = "claim-list";
+  list.setAttribute("aria-label", "이 세션의 주장");
+  session.parts.forEach((part) => {
+    const item = document.createElement("li");
+    item.className = "claim-line";
+    item.textContent = part.text;
+    list.append(item);
   });
 
-  if (runtime.selectedChipId === null) selectChip(def.id);
+  card.append(kicker, list);
+  elements.triageLane.append(card);
 }
 
 function spawnZonePop(zoneKey, text, positive) {
@@ -1005,26 +952,25 @@ function updateWaveProgress() {
   );
 }
 
-function assignSelectedChip(zone) {
-  if (runtime.mode !== "play" || runtime.locked) return;
-  if (!runtime.selectedChipId) {
-    showToast("먼저 분류할 신호를 고르세요.");
-    return;
-  }
-  resolveChip(runtime.selectedChipId, zone);
+function mistakeTypeFor(sessionZone, judgedZone) {
+  if (sessionZone === "false" && judgedZone === "true") return "approved-spoofed";
+  if (sessionZone === "true" && judgedZone === "false") return "rejected-genuine";
+  return "misjudged-corrupted";
 }
 
-function resolveChip(chipId, zone) {
-  const chip = runtime.activeChips.get(chipId);
-  if (!chip || runtime.mode !== "play" || runtime.locked) return;
+function judgeSession(zone) {
+  if (runtime.mode !== "play" || runtime.locked) return;
+  const session = runtime.currentSession;
+  if (!session) return;
 
-  const finalCore = runtime.roundIndex === TOTAL_ROUNDS - 1;
-  const deepVerify = isDeepVerifyBurstActive();
-  const correct = zone === chip.def.zone;
-  const elapsed = performance.now() - chip.spawnedAt;
-  const remainingRatio = 1 - clamp01(elapsed / runtime.waveConfig.travelMs);
+  window.cancelAnimationFrame(runtime.animationFrame);
+  const deepVerify = runtime.deepVerifyArmed;
+  runtime.deepVerifyArmed = false;
+  if (deepVerify) runtime.deepVerifyUsedWaveIndex = runtime.roundIndex;
 
-  removeChip(chipId);
+  const correct = zone === session.zone;
+  const elapsed = performance.now() - runtime.sessionStartedAt;
+  const remainingRatio = 1 - clamp01(elapsed / runtime.waveConfig.timerMs);
 
   if (correct) {
     runtime.streak += 1;
@@ -1038,40 +984,44 @@ function resolveChip(chipId, zone) {
     pulseMoriState(runtime.streak >= 2 ? "sync-linked" : "answer-correct");
     updateScoreAndIntegrity();
     updateWaveProgress();
-    announce(`${ZONE_LABELS[zone]} 구역에 정확히 넣었습니다. ${points}점 획득. 연속 ${runtime.streak}.`);
-
-    if (runtime.waveCorrect >= runtime.waveConfig.target) {
-      concludeWave("correct");
-    }
-    return;
+    announce(`${ZONE_LABELS[zone]} 판정이 정확했습니다. ${points}점 획득. 연속 ${runtime.streak}.`);
+  } else {
+    runtime.streak = 0;
+    runtime.waveWrong += 1;
+    runtime.wrongCount += 1;
+    const integrityLoss = getWrongJudgmentLoss(mistakeTypeFor(session.zone, zone), deepVerify);
+    runtime.integrity = Math.max(0, runtime.integrity - integrityLoss);
+    spawnZonePop(zone, `-${integrityLoss}`, false);
+    audio.wrong();
+    pulseMoriState("answer-wrong", WRONG_ZONE_HINT[session.zone]);
+    updateScoreAndIntegrity();
+    updateWaveProgress();
+    announce(`${ZONE_LABELS[zone]} 판정은 오답입니다. 기억 무결성 ${integrityLoss}칸 손실.`);
   }
 
-  runtime.streak = 0;
-  runtime.waveWrong += 1;
-  runtime.wrongCount += 1;
-  const integrityLoss = getWrongAnswerIntegrityLoss(deepVerify);
-  runtime.integrity = Math.max(0, runtime.integrity - integrityLoss);
-  spawnZonePop(zone, `-${integrityLoss}`, false);
-  audio.wrong();
-  pulseMoriState("answer-wrong", WRONG_ZONE_HINT[chip.def.zone]);
-  updateScoreAndIntegrity();
-  updateWaveProgress();
-  announce(`${ZONE_LABELS[zone]} 구역은 오답입니다. 기억 무결성 ${integrityLoss}칸 손실.`);
-
-  if (runtime.integrity <= 0) {
-    concludeWave("wrong");
-  }
+  advanceSessionOrConclude();
 }
 
-function expireChip(chipId) {
-  const chip = runtime.activeChips.get(chipId);
-  if (!chip) return;
+function expireSession() {
   runtime.streak = 0;
   runtime.waveMissed += 1;
   runtime.missedCount += 1;
-  removeChip(chipId);
   updateScoreAndIntegrity();
   updateWaveProgress();
+  advanceSessionOrConclude();
+}
+
+function advanceSessionOrConclude() {
+  if (runtime.integrity <= 0) {
+    concludeWave("wrong");
+    return;
+  }
+  runtime.sessionIndex += 1;
+  if (runtime.sessionIndex >= runtime.waveSessions.length) {
+    concludeWave("correct");
+    return;
+  }
+  presentSession();
 }
 
 function useArchiveLens() {
@@ -1084,63 +1034,60 @@ function useArchiveLens() {
     showToast("이번 런의 ARCHIVE LENS 충전을 모두 사용했습니다.");
     return;
   }
-  const targetId = runtime.selectedChipId ?? [...runtime.activeChips.keys()][0];
-  const chip = targetId ? runtime.activeChips.get(targetId) : null;
-  if (!chip) {
-    showToast("지금 화면에 분류할 신호가 없습니다.");
+  const session = runtime.currentSession;
+  if (!session) {
+    showToast("지금 심사할 세션이 없습니다.");
     return;
   }
 
   runtime.lensCharges -= 1;
   runtime.lensUsedRoundIndex = runtime.roundIndex;
-  runtime.lensRevealChipId = targetId;
-  chip.el.classList.add("is-lens-revealed");
-  chip.el.dataset.revealZone = chip.def.zone;
+  const card = elements.triageLane.querySelector(".session-card");
+  if (card) {
+    card.classList.add("is-lens-revealed");
+    card.dataset.revealZone = session.zone;
+  }
 
-  elements.roundFeedback.textContent = `ARCHIVE LENS · 신호 하나의 정답 구역(${ZONE_LABELS[chip.def.zone]})을 밝혔습니다.`;
+  elements.roundFeedback.textContent = `ARCHIVE LENS · 이 세션의 실제 판정(${ZONE_LABELS[session.zone]})을 밝혔습니다.`;
   elements.roundFeedback.className = "round-feedback is-lens";
   setMoriState("lens-used");
   showRoundImpact(
     "lens",
     "ARCHIVE LENS",
-    ZONE_LABELS[chip.def.zone],
+    ZONE_LABELS[session.zone],
     `${runtime.lensCharges} CHARGE${runtime.lensCharges === 1 ? "" : "S"} REMAIN`,
     reducedMotionQuery.matches ? 450 : 900,
   );
   updateScoreAndIntegrity();
   audio.navigate(runtime.lensCharges);
-  announce(`ARCHIVE LENS를 사용했습니다. 신호 하나의 정답 구역을 밝혔습니다. 남은 충전 ${runtime.lensCharges}회.`);
+  announce(`ARCHIVE LENS를 사용했습니다. 이 세션의 실제 판정을 밝혔습니다. 남은 충전 ${runtime.lensCharges}회.`);
 }
 
-function triggerDeepVerifyBurst() {
+function toggleDeepVerifyWager() {
   if (runtime.mode !== "play" || runtime.locked) return;
-  if (runtime.integrity <= 1) {
+  if (runtime.deepVerifyUsedWaveIndex === runtime.roundIndex) {
+    showToast("DEEP VERIFY는 웨이브마다 한 번만 사용할 수 있습니다.");
+    return;
+  }
+  if (!runtime.deepVerifyArmed && runtime.integrity <= 1) {
     showToast("DEEP VERIFY는 기억 무결성이 2칸 이상일 때만 켤 수 있습니다.");
     announce("DEEP VERIFY를 사용할 수 없습니다. 기억 무결성이 1칸 남았습니다.");
     return;
   }
-  if (runtime.deepVerifyUsedWaveIndex === runtime.roundIndex || isDeepVerifyBurstActive()) {
-    showToast("DEEP VERIFY는 웨이브마다 한 번만 사용할 수 있습니다.");
-    return;
-  }
 
-  runtime.deepVerifyUsedWaveIndex = runtime.roundIndex;
-  runtime.deepVerifyBurstUntil = performance.now() + DEEP_VERIFY_BURST_MS;
+  runtime.deepVerifyArmed = !runtime.deepVerifyArmed;
   updateDeepVerifyStatus();
-  elements.roundFeedback.textContent =
-    `DEEP VERIFY ON · ${Math.round(DEEP_VERIFY_BURST_MS / 1000)}초간 정답 +${runtime.deepVerifyBonus} / 오답 무결성 -2`;
-  elements.roundFeedback.className = "round-feedback is-wager";
-  setMoriState("deep-verify");
-  audio.navigate(2);
-  announce(`DEEP VERIFY를 켰습니다. ${Math.round(DEEP_VERIFY_BURST_MS / 1000)}초 동안 정답이면 ${runtime.deepVerifyBonus}점을 더 받고, 실패하면 기억 무결성을 2칸 잃습니다.`);
-
-  window.setTimeout(() => {
-    if (runtime.mode !== "play" || runtime.locked) return;
-    updateDeepVerifyStatus();
-    const finalCore = runtime.roundIndex === TOTAL_ROUNDS - 1;
-    announce("DEEP VERIFY 시간이 끝났습니다.");
-    if (!finalCore) setMoriState("observing", WAVE_MORI_DIALOGUE[runtime.roundIndex]);
-  }, DEEP_VERIFY_BURST_MS + 20);
+  if (runtime.deepVerifyArmed) {
+    elements.roundFeedback.textContent =
+      `DEEP VERIFY ON · 이번 판정 정답 +${runtime.deepVerifyBonus} / 오답 무결성 -2`;
+    elements.roundFeedback.className = "round-feedback is-wager";
+    setMoriState("deep-verify");
+    audio.navigate(2);
+    announce(`DEEP VERIFY를 켰습니다. 이번 판정에서 정답이면 ${runtime.deepVerifyBonus}점을 더 받고, 실패하면 기억 무결성을 2칸 잃습니다.`);
+  } else {
+    setMoriState("observing", WAVE_MORI_DIALOGUE[runtime.roundIndex]);
+    announce("DEEP VERIFY를 껐습니다.");
+  }
 }
 
 function startWave() {
@@ -1154,29 +1101,24 @@ function startWave() {
   const finalCore = runtime.roundIndex === TOTAL_ROUNDS - 1;
   runtime.locked = false;
   runtime.waveConfig = getWaveConfig(runtime.roundIndex);
-  runtime.waveChipPool = createChipPool(runtime.catalog, runtime.roundIndex, runtime.seed);
-  runtime.waveChipCursor = 0;
+  runtime.waveSessions = createSessionClaims(runtime.catalog, runtime.roundIndex, runtime.seed);
+  runtime.sessionIndex = 0;
   runtime.waveCorrect = 0;
   runtime.waveWrong = 0;
   runtime.waveMissed = 0;
-  runtime.nextSpawnAt = performance.now();
-  runtime.waveDeadline = performance.now() + getWaveDurationMs(runtime.roundIndex);
-  runtime.clockTenths = -1;
-  runtime.pressureWarned = false;
+  runtime.deepVerifyArmed = false;
   runtime.deepVerifyBonus = getDeepVerifyBonus(runtime.roundIndex);
-  clearTriageLane();
   elements.screenStack.dataset.timePressure = "false";
   elements.screenStack.dataset.finalRound = String(finalCore);
 
   elements.roundKicker.textContent = finalCore
-    ? `FINAL CORE / SIGNAL TRIAGE · ${waveNumber}/${String(TOTAL_ROUNDS).padStart(2, "0")}`
-    : `SIGNAL TRIAGE · WAVE ${waveNumber}/${String(TOTAL_ROUNDS).padStart(2, "0")}`;
+    ? `FINAL CORE / SESSION AUDIT · ${waveNumber}/${String(TOTAL_ROUNDS).padStart(2, "0")}`
+    : `SESSION AUDIT · WAVE ${waveNumber}/${String(TOTAL_ROUNDS).padStart(2, "0")}`;
   elements.roundHeading.textContent = PLAY_INSTRUCTION.prompt;
   elements.boardInstruction.textContent = PLAY_INSTRUCTION.instruction;
   elements.roundFeedback.textContent = "";
   elements.roundFeedback.className = "round-feedback";
   resetRoundImpact();
-  updateWaveTime();
   updateWaveProgress();
   document.title = finalCore
     ? "[FINAL CORE] STATE//LESS"
@@ -1193,46 +1135,35 @@ function startWave() {
     announce(`${runtime.roundIndex + 1}번째 웨이브 시작. ${PLAY_INSTRUCTION.instruction}`);
   }
   if (runtime.roundIndex === 0 && runtime.memory.runs === 0) {
-    showToast("칩 문장을 위 LIVE SIGNAL 값과 비교하세요. '읽을 수 없다'류 문장은 CORRUPTED입니다.");
+    showToast("각 줄을 위 LIVE SIGNAL 값과 하나씩 대조하세요. 한 줄이라도 다르면 SPOOFED, 읽을 수 없는 줄이 있으면 CORRUPTED입니다.");
   }
-  runtime.animationFrame = window.requestAnimationFrame(updateWaveFrame);
+  presentSession();
 }
 
-function updateWaveFrame(timestamp) {
+function presentSession() {
+  runtime.currentSession = runtime.waveSessions[runtime.sessionIndex];
+  runtime.sessionStartedAt = performance.now();
+  runtime.sessionDeadline = runtime.sessionStartedAt + runtime.waveConfig.timerMs;
+  runtime.clockTenths = -1;
+  renderSessionCard(runtime.currentSession);
+  updateSessionTime();
+  runtime.animationFrame = window.requestAnimationFrame(updateSessionFrame);
+}
+
+function updateSessionFrame(timestamp) {
   if (runtime.mode !== "play" || runtime.locked) return;
 
-  if (
-    timestamp >= runtime.nextSpawnAt
-    && runtime.activeChips.size < runtime.waveConfig.maxConcurrent
-    && runtime.waveChipCursor < runtime.waveChipPool.length
-  ) {
-    spawnChip();
-    runtime.nextSpawnAt = timestamp + runtime.waveConfig.spawnIntervalMs;
-  }
+  const ratio = clamp01((timestamp - runtime.sessionStartedAt) / runtime.waveConfig.timerMs);
+  const card = elements.triageLane.querySelector(".session-card");
+  if (card) card.style.setProperty("--session-progress", String(ratio * 100));
 
-  const expiredIds = [];
-  runtime.activeChips.forEach((chip, chipId) => {
-    const ratio = clamp01((timestamp - chip.spawnedAt) / runtime.waveConfig.travelMs);
-    chip.el.style.setProperty("--chip-progress", String(ratio * 100));
-    if (ratio >= 1) expiredIds.push(chipId);
-  });
-  expiredIds.forEach((chipId) => expireChip(chipId));
+  updateSessionTime();
 
-  updateWaveTime();
-
-  if (!runtime.pressureWarned && runtime.waveDeadline - timestamp <= 5_000) {
-    runtime.pressureWarned = true;
-    elements.screenStack.dataset.timePressure = "true";
-    setMoriState("time-critical");
-    audio.warning();
-    announce("5초 남았습니다. 남은 신호를 빠르게 분류하세요.");
-  }
-
-  if (timestamp >= runtime.waveDeadline) {
-    concludeWave("timeout");
+  if (timestamp >= runtime.sessionDeadline) {
+    expireSession();
     return;
   }
-  runtime.animationFrame = window.requestAnimationFrame(updateWaveFrame);
+  runtime.animationFrame = window.requestAnimationFrame(updateSessionFrame);
 }
 
 function concludeWave(outcome) {
@@ -1304,10 +1235,10 @@ function concludeWave(outcome) {
       `${finalCore ? "FINAL CORE · " : ""}웨이브 실패 · 정답 ${runtime.waveCorrect}/${runtime.waveConfig.target}`;
     elements.roundFeedback.className = "round-feedback is-negative";
     showRoundImpact(
-      outcome === "timeout" ? "timeout" : "wrong",
-      finalCore ? "CORE FRACTURE" : outcome === "timeout" ? "TIME FRACTURE" : "INDEX HURT",
+      "wrong",
+      finalCore ? "CORE FRACTURE" : "INDEX HURT",
       `${runtime.waveCorrect}/${runtime.waveConfig.target}`,
-      outcome === "timeout" ? "SCAN WINDOW CLOSED" : "INTEGRITY DEPLETED",
+      "INTEGRITY DEPLETED",
     );
     announce(`웨이브 ${runtime.roundIndex + 1}을 완료하지 못했습니다. 정답 ${runtime.waveCorrect}/${runtime.waveConfig.target}.`);
   }
@@ -1424,7 +1355,12 @@ async function finishGame() {
   revealScreenOnStackedLayout(elements.resultScreen);
   audio.finish(result.ending === "verified");
   if (runtime.inputMode === "keyboard") {
-    elements.rememberButton.focus({ preventScroll: true });
+    // Focus the heading, not a button: a habitual Enter carried over from the
+    // wave-transition screen must not immediately re-trigger a restart before
+    // the player has seen their score. ArrowLeft/ArrowRight still reach the
+    // result buttons via moveFocus (which defaults to index 0 from no focus).
+    elements.resultHeading.tabIndex = -1;
+    elements.resultHeading.focus({ preventScroll: true });
   }
   const recordAnnouncement = foundNewFragment ? ` ${recoveredRecord.code}, ${recoveredRecord.title} 공개.` : " 새 기억 조각 없음.";
   const directiveAnnouncement = runtime.directiveCompleted
@@ -1549,7 +1485,7 @@ function handleGlobalKeydown(event) {
   if (runtime.mode === "play" && !runtime.locked) {
     if (event.key.toLowerCase() === "d") {
       event.preventDefault();
-      if (!event.repeat) triggerDeepVerifyBurst();
+      if (!event.repeat) toggleDeepVerifyWager();
       return;
     }
     if (event.key.toLowerCase() === "f") {
@@ -1557,24 +1493,19 @@ function handleGlobalKeydown(event) {
       if (!event.repeat) useArchiveLens();
       return;
     }
-    if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
-      event.preventDefault();
-      cycleChipSelection(event.key === "ArrowRight" ? 1 : -1);
-      return;
-    }
     if (event.key === "1") {
       event.preventDefault();
-      assignSelectedChip("true");
+      judgeSession("true");
       return;
     }
     if (event.key === "2") {
       event.preventDefault();
-      assignSelectedChip("false");
+      judgeSession("false");
       return;
     }
     if (event.key === "3") {
       event.preventDefault();
-      assignSelectedChip("corrupted");
+      judgeSession("corrupted");
       return;
     }
     return;
@@ -1636,10 +1567,10 @@ elements.memoryButtons.forEach((button) => {
 });
 elements.returnStartButton.addEventListener("click", () => startGame());
 elements.lensButton.addEventListener("click", useArchiveLens);
-elements.deepVerifyButton.addEventListener("click", triggerDeepVerifyBurst);
-elements.zoneTrue.addEventListener("click", () => assignSelectedChip("true"));
-elements.zoneFalse.addEventListener("click", () => assignSelectedChip("false"));
-elements.zoneCorrupted.addEventListener("click", () => assignSelectedChip("corrupted"));
+elements.deepVerifyButton.addEventListener("click", toggleDeepVerifyWager);
+elements.zoneTrue.addEventListener("click", () => judgeSession("true"));
+elements.zoneFalse.addEventListener("click", () => judgeSession("false"));
+elements.zoneCorrupted.addEventListener("click", () => judgeSession("corrupted"));
 elements.roundContinueButton.addEventListener("click", advanceRound);
 elements.rememberButton.addEventListener("click", rememberResultAndRestart);
 elements.forgetButton.addEventListener("click", forgetAndReturn);

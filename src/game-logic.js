@@ -9,17 +9,14 @@ export const FINAL_CORE_DEEP_VERIFY_BONUS = DEEP_VERIFY_BONUS * 2;
 export const RUN_DIRECTIVE_BONUS = 600;
 
 export const PLAY_INSTRUCTION = {
-  prompt: "흐르는 신호를 잡아 올바른 구역에 넣으세요.",
-  instruction: "TRUE · FALSE · CORRUPTED 중 이 신호가 속한 구역으로 옮기세요.",
+  prompt: "이 세션은 정말 당신입니까?",
+  instruction: "제시된 주장을 읽고 VERIFIED · SPOOFED · CORRUPTED로 판정하세요.",
 };
 
-export const WAVE_CHIP_TARGET = [5, 6, 7, 8, 9, 11];
-export const WAVE_SPAWN_INTERVAL_MS = [2_600, 2_300, 2_000, 1_700, 1_400, 1_100];
-export const WAVE_TRAVEL_MS = [7_200, 6_400, 5_600, 4_800, 4_000, 3_200];
-export const WAVE_MAX_CONCURRENT = [1, 2, 2, 3, 3, 3];
+export const WAVE_SESSION_TARGET = [4, 5, 6, 6, 7, 8];
+export const WAVE_FACTS_PER_CLAIM = [2, 2, 3, 3, 3, 3];
+export const WAVE_SESSION_TIMER_MS = [13_000, 11_500, 10_000, 9_000, 8_000, 7_000];
 export const WAVE_CORRUPTED_CHANCE = [0, 0.15, 0.2, 0.25, 0.3, 0.35];
-export const DEEP_VERIFY_BURST_MS = 5_000;
-export const WAVE_DURATION_BUFFER = 1.8;
 
 const RUN_DIRECTIVES = [
   {
@@ -313,57 +310,56 @@ function shuffle(items, random) {
 }
 
 export function getWaveConfig(waveIndex) {
-  const index = clamp(Math.floor(waveIndex), 0, WAVE_CHIP_TARGET.length - 1);
+  const index = clamp(Math.floor(waveIndex), 0, WAVE_SESSION_TARGET.length - 1);
   return {
-    target: WAVE_CHIP_TARGET[index],
-    spawnIntervalMs: WAVE_SPAWN_INTERVAL_MS[index],
-    travelMs: WAVE_TRAVEL_MS[index],
-    maxConcurrent: WAVE_MAX_CONCURRENT[index],
+    target: WAVE_SESSION_TARGET[index],
+    factsPerClaim: WAVE_FACTS_PER_CLAIM[index],
+    timerMs: WAVE_SESSION_TIMER_MS[index],
     corruptedChance: WAVE_CORRUPTED_CHANCE[index],
   };
 }
-
-export function getWaveDurationMs(waveIndex) {
-  const { target, spawnIntervalMs } = getWaveConfig(waveIndex);
-  return Math.round(target * spawnIntervalMs * WAVE_DURATION_BUFFER);
-}
-
-const ZONE_FIELD = {
-  true: "truthText",
-  false: "lieText",
-  corrupted: "decoyText",
-};
 
 function pickZone(random, corruptedChance) {
   if (random() < corruptedChance) return "corrupted";
   return random() < 0.5 ? "true" : "false";
 }
 
-export function createChipPool(catalog, waveIndex, seed) {
+// Builds one session's claim lines: `factsPerClaim` distinct facts, all stated
+// truthfully except for a single line that carries the session's verdict —
+// a lie for a spoofed session, an unreadable line for a corrupted one. Only
+// one line is ever wrong, so every line has to be checked against LIVE SIGNAL;
+// skimming for "the obviously fake part" doesn't work.
+function buildClaimParts(facts, zone, random) {
+  const oddIndex = Math.floor(random() * facts.length);
+  return facts.map((fact, index) => {
+    const field = index !== oddIndex
+      ? "truthText"
+      : zone === "true" ? "truthText" : zone === "false" ? "lieText" : "decoyText";
+    return { factId: fact.id, text: fact[field] };
+  });
+}
+
+export function createSessionClaims(catalog, waveIndex, seed) {
   if (catalog.length < 1) {
-    throw new Error("At least one fact is required to build a signal wave.");
+    throw new Error("At least one fact is required to build a session claim.");
   }
 
-  const { target, corruptedChance } = getWaveConfig(waveIndex);
+  const { target, factsPerClaim, corruptedChance } = getWaveConfig(waveIndex);
+  const factsNeeded = Math.min(factsPerClaim, catalog.length);
   const random = createRandom(seedFromString(`${seed}:wave:${waveIndex}`));
-  const poolSize = Math.max(target * 3, 12);
-  const facts = shuffle(catalog, random);
-  const chips = [];
+  const sessions = [];
 
-  for (let index = 0; index < poolSize; index += 1) {
-    const fact = facts[index % facts.length];
+  for (let index = 0; index < target; index += 1) {
     const zone = pickZone(random, corruptedChance);
-    const field = ZONE_FIELD[zone];
-    chips.push({
-      id: `${fact.id}-${zone}-${index}`,
-      factId: fact.id,
+    const facts = shuffle(catalog, random).slice(0, factsNeeded);
+    sessions.push({
+      id: `session-${waveIndex}-${index}`,
       zone,
-      text: fact[field],
-      evidenceLabel: fact.label,
+      parts: buildClaimParts(facts, zone, random),
     });
   }
 
-  return shuffle(chips, random);
+  return sessions;
 }
 
 export function getDeepVerifyBonus(roundIndex, total = TOTAL_ROUNDS) {
@@ -384,8 +380,12 @@ export function scoreCorrectAnswer(
   return 500 + speedBonus + streakBonus + wagerBonus;
 }
 
-export function getWrongAnswerIntegrityLoss(deepVerify = false) {
-  return deepVerify ? DEEP_VERIFY_INTEGRITY_LOSS : 1;
+// Letting a spoofed session through costs more than wrongly rejecting a
+// genuine one — approving an impostor is the failure mode the whole premise
+// is about, so it should sting more than an overly cautious false rejection.
+export function getWrongJudgmentLoss(mistakeType, deepVerify = false) {
+  if (deepVerify) return DEEP_VERIFY_INTEGRITY_LOSS;
+  return mistakeType === "approved-spoofed" ? 2 : 1;
 }
 
 export function getRunDirective(runs = 0, fragments = 0) {
@@ -467,7 +467,7 @@ export function awardMemoryFragment(current) {
 }
 
 export function getArchiveLensCharges(fragments) {
-  return Math.min(3, 1 + Math.floor(normalizeFragmentCount(fragments) / 2));
+  return Math.min(3, 2 + Math.floor(normalizeFragmentCount(fragments) / 2));
 }
 
 export function getFragmentReward(current, ending) {
