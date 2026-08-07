@@ -328,6 +328,7 @@ Papers, Please식 대조로 전환한 뒤에도 참여자가 실제 게임으로
 | OpenAI Codex | 개발 보조(SESSION AUDIT까지) | 사용 환경 제공 버전 | <https://openai.com/codex/> |
 | Claude Code (Anthropic) | 개발 보조(터미널 이동+도킹 재설계, Puppeteer 검증) | 사용 환경 제공 버전 | <https://www.anthropic.com/claude-code> |
 | puppeteer-core | 재설계 검증용 헤드리스/로컬 Chrome 조작 | package.json 명시 버전 | Apache-2.0, <https://github.com/puppeteer/puppeteer> |
+| Pandoc | 제출용 PDF 생성 시 마크다운→HTML 변환(게임 실행에는 사용하지 않음) | 3.9.0 | GPL-2.0-or-later, <https://pandoc.org/> |
 | JetBrains Mono | 일지·터미널 텍스트용 모노스페이스 폰트, `public/fonts/`에 자체 호스팅 | v24 (가변 폰트) | SIL Open Font License 1.1, <https://github.com/JetBrains/JetBrainsMono> |
 
 MORI 전신 기준표와 17개 상황별 흉상 이미지는 참여자가 기록된 프롬프트를 사용해 ChatGPT Image에서 생성·선택했습니다. 폰트 1종(JetBrains Mono, 위 표 참고)을 제외하면 그 외 외부 이미지, 아이콘, 음원, 영상 파일은 사용하지 않았습니다. UI 그래픽은 HTML/CSS로, 효과음은 Web Audio API로 실시간 생성합니다.
@@ -339,7 +340,10 @@ npm test
 npm run build
 STATELESS_GAME_URL=http://127.0.0.1:5173/ STATELESS_INPUT_MODE=keyboard npm run record
 STATELESS_GAME_URL=http://127.0.0.1:5173/ STATELESS_INPUT_MODE=mouse npm run record
+npm run docs:pdf
 ```
+
+`npm run docs:pdf`(`scripts/build-docs-pdf.mjs`)는 로컬 Pandoc으로 `docs/게임_소개.md`/`docs/AI_활용_기술.md`를 `pdf-style.css`가 적용된 HTML로 변환한 뒤, 로컬 Chrome의 `page.pdf()`로 A4 PDF를 생성합니다. 생성 후에는 매번 `pdftoppm`으로 각 페이지를 이미지로 렌더해 잘림·빈 페이지·깨진 한글이 없는지 직접 확인합니다.
 
 `npm test`는 20개 게임 규칙·쿠키 직렬화 테스트를 실행합니다. `npm run build`는 GitHub Pages에 배포할 `dist/` 정적 파일을 생성합니다.
 
