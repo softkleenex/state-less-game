@@ -1007,6 +1007,18 @@ kbd {
   letter-spacing: 0.09em;
 }
 
+.is-typing::after {
+  content: "▍";
+  margin-left: 2px;
+  color: var(--cyan-300);
+  animation: typing-cursor-blink 760ms step-end infinite;
+}
+
+@keyframes typing-cursor-blink {
+  0%, 49% { opacity: 1; }
+  50%, 100% { opacity: 0; }
+}
+
 .result-mori-dialogue {
   margin-top: 8px;
   margin-bottom: 2px;

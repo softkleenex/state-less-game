@@ -10,6 +10,7 @@ import {
   LENS_EXTEND_BONUS_MS,
   MAX_INTEGRITY,
   MAX_MEMORY_FRAGMENTS,
+  PLAY_INSTRUCTION,
   RUN_BUFF_POOL_SIZE,
   RUN_DURATION_MS,
   SLOT_COUNT,
@@ -329,6 +330,39 @@ function updateMemoryRoute(route) {
   elements.memoryRoute.textContent = route;
 }
 
+const typewriterTimers = new WeakMap();
+
+// MORI's lines type themselves out instead of appearing all at once, so the
+// character reads as speaking in real time rather than a label updating.
+// Restarting on the same element cancels whatever was still typing there.
+function typewriteText(el, text, { speedMsPerChar = 20, onDone } = {}) {
+  const previousTimer = typewriterTimers.get(el);
+  if (previousTimer) window.clearInterval(previousTimer);
+  el.classList.remove("is-typing");
+
+  if (reducedMotionQuery.matches || !text) {
+    el.textContent = text;
+    typewriterTimers.delete(el);
+    onDone?.();
+    return;
+  }
+
+  el.textContent = "";
+  el.classList.add("is-typing");
+  let index = 0;
+  const timer = window.setInterval(() => {
+    index += 1;
+    el.textContent = text.slice(0, index);
+    if (index >= text.length) {
+      window.clearInterval(timer);
+      typewriterTimers.delete(el);
+      el.classList.remove("is-typing");
+      onDone?.();
+    }
+  }, speedMsPerChar);
+  typewriterTimers.set(el, timer);
+}
+
 function setMoriState(state, dialogueOverride = "") {
   const copy = MORI_STATES[state] ?? MORI_STATES.observing;
   const portraitState = MORI_STATES[state] ? state : "observing";
@@ -336,8 +370,9 @@ function setMoriState(state, dialogueOverride = "") {
   elements.moriPresence.dataset.characterState = state;
   elements.moriPresenceLabel.textContent = copy.caption;
   elements.moriStateLabel.textContent = copy.label;
-  elements.moriDialogue.textContent = dialogueOverride || copy.dialogue;
-  elements.resultMoriDialogue.textContent = dialogueOverride || copy.dialogue;
+  const line = dialogueOverride || copy.dialogue;
+  typewriteText(elements.moriDialogue, line, { speedMsPerChar: 16 });
+  typewriteText(elements.resultMoriDialogue, line, { speedMsPerChar: 20 });
   elements.moriStateThumbImg.src = `./mori/mori_${portraitState}.webp`;
 }
 
@@ -388,6 +423,13 @@ function renderArchiveLog() {
   elements.archiveLogList.replaceChildren(fragment);
 }
 
+function speakIntroLines(heading, message) {
+  typewriteText(elements.introHeading, heading, {
+    speedMsPerChar: 26,
+    onDone: () => typewriteText(elements.introMessage, message, { speedMsPerChar: 16 }),
+  });
+}
+
 function renderIntro(messageOverride = "") {
   const returning = runtime.memoryFound;
   const fragments = runtime.memory.fragments;
@@ -425,30 +467,32 @@ function renderIntro(messageOverride = "") {
   );
 
   if (returning && archiveComplete) {
-    elements.introHeading.textContent = "여섯 파일을 전부 기억하고 있어요.";
-    elements.introMessage.textContent = runtime.memory.runs
-      + "번의 방어와 최고 점수 "
-      + formatScore(runtime.memory.bestScore)
-      + "가 남아 있습니다. ARCHIVE LENS "
-      + lensCharges
-      + "회로 완성된 일지의 기록에 다시 도전할 수 있습니다.";
+    speakIntroLines(
+      "여섯 파일 다 기억하고 있어.",
+      `${runtime.memory.runs}번 방어한 기록이랑 최고 점수 ${formatScore(runtime.memory.bestScore)}가 남아 있어. `
+        + `ARCHIVE LENS ${lensCharges}회로 다시 도전해봐.`,
+    );
     elements.terminalStatus.textContent = "ARCHIVE COMPLETE";
     updateMemoryRoute("ledger/archive-complete");
     setMoriState("archive-complete");
   } else if (returning) {
     const ending = runtime.memory.lastEnding;
-    elements.introHeading.textContent = `기억하고 있어요. ${runtime.memory.visits}번째 방문이에요.`;
-    elements.introMessage.textContent = ending
-      ? `기억 조각 ${runtime.memory.fragments}/${MAX_MEMORY_FRAGMENTS}, 이전 결말 ${ending.toUpperCase()}, 최고 점수 ${formatScore(runtime.memory.bestScore)}가 남아 있습니다. 이번 런의 ARCHIVE LENS는 ${lensCharges}회입니다.`
-      : `방문 기록과 기억 조각 ${runtime.memory.fragments}/${MAX_MEMORY_FRAGMENTS}을 찾았습니다. ARCHIVE LENS ${lensCharges}회를 활용해 다음 파일을 복구하세요.`;
+    speakIntroLines(
+      `돌아왔네. ${runtime.memory.visits}번째야.`,
+      ending
+        ? `기억 조각은 ${runtime.memory.fragments}/${MAX_MEMORY_FRAGMENTS}, 저번 결말은 ${ending.toUpperCase()}, 최고 점수는 ${formatScore(runtime.memory.bestScore)}로 남겨놨어. 이번엔 ARCHIVE LENS ${lensCharges}회 줄게.`
+        : `네 방문 기록이랑 기억 조각 ${runtime.memory.fragments}/${MAX_MEMORY_FRAGMENTS}은 찾아놨어. ARCHIVE LENS ${lensCharges}회로 다음 파일을 열어봐.`,
+    );
     elements.terminalStatus.textContent = "MEMORY FOUND";
     updateMemoryRoute(`ledger/visit-${String(runtime.memory.visits).padStart(2, "0")}`);
     setMoriState("return-found");
   } else {
-    elements.introHeading.textContent = messageOverride || "MORI의 기억이 비어 있습니다.";
-    elements.introMessage.textContent = messageOverride
-      ? "게임 쿠키가 삭제되었습니다. 기억 방식을 다시 고르면 새로운 일지에서 시작합니다."
-      : "코어를 지켜 첫 기억 조각을 복구하세요. 게임 진행 정보만 쿠키에 남고 개인정보는 저장하지 않습니다.";
+    speakIntroLines(
+      messageOverride || "아직 널 몰라.",
+      messageOverride
+        ? "쿠키를 지웠구나. 기억 방식을 다시 고르면, 처음부터 다시 알아갈게."
+        : "코어를 지켜줘. 그럼 내 첫 기억 조각을 돌려줄게. 남기는 건 진행 정보뿐이야 — 개인정보는 안 건드려.",
+    );
     elements.terminalStatus.textContent = "MEMORY EMPTY";
     updateMemoryRoute("ledger/unindexed");
     setMoriState("boot-empty");
@@ -813,6 +857,8 @@ async function startGame(policy = null) {
   elements.coreOrb.dataset.pulse = "";
   elements.comboCallout.classList.remove("is-active");
 
+  elements.roundHeading.textContent = PLAY_INSTRUCTION.prompt;
+  elements.boardInstruction.textContent = PLAY_INSTRUCTION.instruction;
   updateTelemetry();
   updateHud();
   elements.terminalStatus.textContent = "CORE ACTIVE";
@@ -1178,12 +1224,13 @@ async function finishRun() {
     ? "ARCHIVE COMPLETE"
     : result.ending === "verified" ? "MEMORY VERIFIED" : "MEMORY UNSTABLE";
   updateMemoryRoute(completedNow ? "ending/archive-complete" : `ending/${result.ending}`);
-  setMoriState(completedNow
+  const resultMoriState = completedNow
     ? "archive-complete"
-    : result.ending === "verified" ? "result-verified" : "result-unstable");
-  if (styleRemark) {
-    elements.resultMoriDialogue.textContent = `${elements.resultMoriDialogue.textContent} ${styleRemark}`;
-  }
+    : result.ending === "verified" ? "result-verified" : "result-unstable";
+  const resultDialogue = styleRemark
+    ? `${MORI_STATES[resultMoriState].dialogue} ${styleRemark}`
+    : "";
+  setMoriState(resultMoriState, resultDialogue);
   document.title = `${result.rank} RANK · STATE//LESS`;
 
   await transitionTo("result");
@@ -1224,7 +1271,7 @@ async function forgetAndReturn() {
   runtime.lastResult = null;
   runtime.mode = "intro";
   document.title = "STATE//LESS — 이 페이지는 당신을 기억한다";
-  renderIntro("이제 당신을 모릅니다.");
+  renderIntro("이제 널 몰라.");
   await transitionTo("intro");
   revealScreenOnStackedLayout(elements.introScreen);
   showToast("게임 쿠키를 지웠습니다. 저장된 상태는 복구되지 않습니다.");
