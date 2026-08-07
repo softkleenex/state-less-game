@@ -271,6 +271,7 @@
             </p>
 
             <output class="wave-progress" id="wave-progress" aria-live="polite">정화 0 · 오클릭 0 · 놓침 0</output>
+            <output class="active-buffs" id="active-buffs" aria-live="polite"></output>
 
             <div
               class="signal-field"
@@ -278,6 +279,21 @@
               role="group"
               aria-label="신호 필드. 가짜 신호가 뜬 슬롯만 클릭하거나 번호 키 1부터 6까지로 정화하세요."
             >
+              <div class="buff-pick-overlay" id="buff-pick-overlay" role="group" aria-label="런 강화 선택" hidden>
+                <p class="buff-pick-heading">강화를 하나 고르세요</p>
+                <div class="buff-pick-cards">
+                  <button class="buff-card" id="buff-card-0" type="button" data-buff-id="">
+                    <kbd aria-hidden="true">1</kbd>
+                    <strong class="buff-card-name"></strong>
+                    <span class="buff-card-desc"></span>
+                  </button>
+                  <button class="buff-card" id="buff-card-1" type="button" data-buff-id="">
+                    <kbd aria-hidden="true">2</kbd>
+                    <strong class="buff-card-name"></strong>
+                    <span class="buff-card-desc"></span>
+                  </button>
+                </div>
+              </div>
               <button class="signal-slot" id="slot-0" type="button" data-slot-index="0" data-state="idle" style="--sx:18; --sy:26;">
                 <span class="signal-ring" aria-hidden="true"></span>
                 <span class="signal-icon" aria-hidden="true"></span>

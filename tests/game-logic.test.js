@@ -2,6 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  BUFF_CHOICES_PER_PICK,
+  BUFF_DEFINITIONS,
+  BUFF_PICK_TRIGGERS_MS,
   GENUINE_CHANCE,
   MAX_MEMORY_FRAGMENTS,
   RUN_DIRECTIVE_BONUS,
@@ -89,6 +92,33 @@ test("a wrong click on a genuine signal costs more during the deep verify wager"
   assert.equal(getWrongClickLoss(false), WRONG_CLICK_LOSS);
   assert.equal(getWrongClickLoss(true), WRONG_CLICK_LOSS_DEEP_VERIFY);
   assert.equal(WRONG_CLICK_LOSS_DEEP_VERIFY, WRONG_CLICK_LOSS * 2);
+  assert.equal(getWrongClickLoss(false, 1), WRONG_CLICK_LOSS + 1);
+  assert.equal(getWrongClickLoss(false, -1), WRONG_CLICK_LOSS - 1);
+  assert.equal(getWrongClickLoss(false, -99), 0);
+});
+
+test("buff modifiers scale purge scoring without breaking the unmodified default", () => {
+  const base = scorePurge(1, 8);
+  assert.equal(scorePurge(1, 8, 1, {}), base);
+  assert.ok(scorePurge(1, 8, 1, { comboScale: 0.5 }) > base);
+  assert.ok(scorePurge(1, 8, 1, { comboScale: -0.2 }) < base);
+  assert.ok(scorePurge(1, 8, 1, { scoreScale: -0.1 }) < base);
+  assert.equal(
+    scorePurge(1, 8, 2, { comboScale: 0.5 }),
+    scorePurge(1, 8, 1, { comboScale: 0.5 }) * 2,
+  );
+});
+
+test("the buff pool offers exactly two distinct trade-offs at each of three run milestones", () => {
+  assert.equal(BUFF_PICK_TRIGGERS_MS.length, 3);
+  assert.equal(BUFF_CHOICES_PER_PICK, 2);
+  assert.equal(BUFF_DEFINITIONS.length, BUFF_PICK_TRIGGERS_MS.length * BUFF_CHOICES_PER_PICK);
+  assert.equal(new Set(BUFF_DEFINITIONS.map((buff) => buff.id)).size, BUFF_DEFINITIONS.length);
+  for (const buff of BUFF_DEFINITIONS) {
+    assert.ok(buff.name.length > 0);
+    assert.ok(buff.description.length > 0);
+    assert.ok(buff.effects && typeof buff.effects === "object");
+  }
 });
 
 test("run directives rotate and complete only at their stated thresholds", () => {

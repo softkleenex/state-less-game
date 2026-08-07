@@ -2,6 +2,8 @@ import "./styles.css";
 
 import { AudioEngine } from "./audio.js";
 import {
+  BUFF_DEFINITIONS,
+  BUFF_PICK_TRIGGERS_MS,
   DEEP_VERIFY_WINDOW_MS,
   LENS_BOOST_MS,
   LENS_EXTEND_BONUS_MS,
@@ -93,6 +95,9 @@ const elements = {
   deepVerifyLabel: element("deep-verify-label"),
   signalField: element("signal-field"),
   signalSlots: [...document.querySelectorAll(".signal-slot")],
+  activeBuffs: element("active-buffs"),
+  buffPickOverlay: element("buff-pick-overlay"),
+  buffCards: [element("buff-card-0"), element("buff-card-1")],
   waveProgress: element("wave-progress"),
   boardInstruction: element("board-instruction"),
   directiveReadout: element("directive-readout"),
@@ -161,6 +166,14 @@ const runtime = {
   directive: null,
   directiveCompleted: false,
   directiveBonusAwarded: false,
+
+  buffs: {},
+  buffPickActive: false,
+  buffPool: [],
+  buffChoices: [],
+  buffTriggersRemaining: [],
+  buffPauseStartedAt: 0,
+  activeBuffNames: [],
 
   locked: false,
   toastTimer: 0,
@@ -233,6 +246,19 @@ const MORI_STATES = {
 };
 
 const SIGNAL_ICON = { fake: "✕", genuine: "◆" };
+
+function defaultBuffs() {
+  return {
+    comboScale: 0,
+    scoreScale: 0,
+    wrongLossBonus: 0,
+    lifespanScale: 0,
+    concurrentBonus: 0,
+    deepVerifyWindowBonusMs: 0,
+    deepVerifySpawnGenuine: false,
+    lensDurationBonusMs: 0,
+  };
+}
 
 elements.memoryButtons.forEach((button) => {
   button.disabled = true;
@@ -630,6 +656,98 @@ function renderTimeHud(remainingMs) {
   elements.roundTimeBlock.dataset.state = critical ? "critical" : "active";
 }
 
+function updateActiveBuffsReadout() {
+  elements.activeBuffs.textContent = runtime.activeBuffNames.length
+    ? `강화: ${runtime.activeBuffNames.join(" · ")}`
+    : "";
+}
+
+function shuffleInPlace(items) {
+  for (let index = items.length - 1; index > 0; index -= 1) {
+    const target = Math.floor(Math.random() * (index + 1));
+    [items[index], items[target]] = [items[target], items[index]];
+  }
+  return items;
+}
+
+function renderBuffPick() {
+  runtime.buffChoices.forEach((buff, index) => {
+    const card = elements.buffCards[index];
+    card.dataset.buffId = buff.id;
+    card.querySelector(".buff-card-name").textContent = buff.name;
+    card.querySelector(".buff-card-desc").textContent = buff.description;
+  });
+}
+
+function openBuffPick() {
+  if (runtime.buffPool.length < 2) return;
+  runtime.buffPickActive = true;
+  runtime.locked = true;
+  runtime.buffPauseStartedAt = performance.now();
+  const shuffled = shuffleInPlace([...runtime.buffPool]);
+  runtime.buffChoices = shuffled.slice(0, 2).map((id) => BUFF_DEFINITIONS.find((buff) => buff.id === id));
+  renderBuffPick();
+  elements.buffPickOverlay.hidden = false;
+  setMoriState("observing", "잠깐 멈췄어. 이번 런에 남길 강화를 골라.");
+  updateHud();
+  announce(`강화 선택. ${runtime.buffChoices[0].name} 또는 ${runtime.buffChoices[1].name} 중 하나를 고르세요.`);
+}
+
+function closeBuffPick() {
+  runtime.buffPickActive = false;
+  elements.buffPickOverlay.hidden = true;
+  const pauseDuration = performance.now() - runtime.buffPauseStartedAt;
+  runtime.runStartAt += pauseDuration;
+  runtime.nextSpawnAt += pauseDuration;
+  runtime.slots.forEach((slot) => {
+    if (slot.state === "fake" || slot.state === "genuine") slot.deadline += pauseDuration;
+  });
+  runtime.locked = false;
+}
+
+function chooseBuff(buffId) {
+  if (!runtime.buffPickActive) return;
+  const buff = runtime.buffChoices.find((candidate) => candidate.id === buffId);
+  if (!buff) return;
+  const effects = buff.effects;
+
+  runtime.buffs.comboScale += effects.comboScale ?? 0;
+  runtime.buffs.scoreScale += effects.scoreScale ?? 0;
+  runtime.buffs.wrongLossBonus += effects.wrongLossBonus ?? 0;
+  runtime.buffs.lifespanScale += effects.lifespanScale ?? 0;
+  runtime.buffs.concurrentBonus += effects.concurrentBonus ?? 0;
+  runtime.buffs.deepVerifyWindowBonusMs += effects.deepVerifyWindowBonusMs ?? 0;
+  runtime.buffs.deepVerifySpawnGenuine = runtime.buffs.deepVerifySpawnGenuine || Boolean(effects.deepVerifySpawnGenuine);
+  runtime.buffs.lensDurationBonusMs += effects.lensDurationBonusMs ?? 0;
+
+  if (effects.lensChargeBonus) {
+    runtime.lensCharges += effects.lensChargeBonus;
+    runtime.lensMaxCharges += effects.lensChargeBonus;
+  }
+  if (effects.healIntegrity) {
+    runtime.integrity = Math.min(MAX_INTEGRITY, runtime.integrity + effects.healIntegrity);
+  }
+
+  runtime.buffPool = runtime.buffPool.filter(
+    (id) => !runtime.buffChoices.some((choice) => choice.id === id),
+  );
+  runtime.activeBuffNames.push(buff.name);
+  updateActiveBuffsReadout();
+  closeBuffPick();
+  updateHud();
+  showToast(`${buff.name} 적용 — ${buff.description}`);
+  announce(`${buff.name}을 선택했습니다. ${buff.description}`);
+}
+
+function maybeTriggerBuffPick(elapsedMs) {
+  if (runtime.buffPickActive) return false;
+  if (!runtime.buffTriggersRemaining.length) return false;
+  if (elapsedMs < runtime.buffTriggersRemaining[0]) return false;
+  runtime.buffTriggersRemaining.shift();
+  openBuffPick();
+  return true;
+}
+
 async function startGame(policy = null) {
   if (!runtime.ready) return;
   audio.unlock();
@@ -658,6 +776,14 @@ async function startGame(policy = null) {
   runtime.directive = getRunDirective(runtime.memory.runs, runtime.memory.fragments);
   runtime.directiveCompleted = false;
   runtime.directiveBonusAwarded = false;
+  runtime.buffs = defaultBuffs();
+  runtime.buffPickActive = false;
+  runtime.buffPool = BUFF_DEFINITIONS.map((buff) => buff.id);
+  runtime.buffChoices = [];
+  runtime.buffTriggersRemaining = [...BUFF_PICK_TRIGGERS_MS];
+  runtime.activeBuffNames = [];
+  elements.buffPickOverlay.hidden = true;
+  updateActiveBuffsReadout();
   runtime.locked = false;
   runtime.lastResult = null;
   runtime.pendingFragments = runtime.memory.fragments;
@@ -707,7 +833,9 @@ function spawnRandomSignal(timestamp, elapsedMs) {
   const slot = idleSlots[Math.floor(Math.random() * idleSlots.length)];
   const kind = pickSignalKind();
   const lensBoost = timestamp < runtime.lensBoostUntil;
-  const lifespan = getSignalLifespanMs(elapsedMs) * (lensBoost ? 1.6 : 1);
+  const lifespan = getSignalLifespanMs(elapsedMs)
+    * (1 + runtime.buffs.lifespanScale)
+    * (lensBoost ? 1.6 : 1);
 
   slot.kind = kind;
   slot.state = kind;
@@ -743,7 +871,10 @@ function activateSlot(index) {
     runtime.purges += 1;
     if (deepVerifyActive) runtime.deepVerifyPurges += 1;
     const remainingRatio = clamp01((slot.deadline - timestamp) / slot.totalMs);
-    const points = scorePurge(remainingRatio, runtime.combo, deepVerifyActive ? 2 : 1);
+    const points = scorePurge(remainingRatio, runtime.combo, deepVerifyActive ? 2 : 1, {
+      comboScale: runtime.buffs.comboScale,
+      scoreScale: runtime.buffs.scoreScale,
+    });
     runtime.score += points;
     spawnSignalPop(slot.el, `+${points}`, true);
     audio.correct(runtime.combo);
@@ -752,7 +883,7 @@ function activateSlot(index) {
   } else {
     runtime.combo = 0;
     runtime.wrongClicks += 1;
-    const loss = getWrongClickLoss(deepVerifyActive);
+    const loss = getWrongClickLoss(deepVerifyActive, runtime.buffs.wrongLossBonus);
     runtime.integrity = Math.max(0, runtime.integrity - loss);
     spawnSignalPop(slot.el, `-${loss}`, false);
     audio.wrong();
@@ -777,7 +908,8 @@ function useArchiveLens() {
   runtime.lensCharges -= 1;
   runtime.lensUses += 1;
   const timestamp = performance.now();
-  runtime.lensBoostUntil = timestamp + LENS_BOOST_MS;
+  runtime.lensBoostUntil = timestamp
+    + Math.max(500, LENS_BOOST_MS + runtime.buffs.lensDurationBonusMs);
   runtime.slots.forEach((slot) => {
     if (slot.state === "fake" || slot.state === "genuine") {
       slot.deadline += LENS_EXTEND_BONUS_MS;
@@ -800,11 +932,25 @@ function toggleDeepVerifyWager() {
   }
 
   runtime.deepVerifyUsed = true;
-  runtime.deepVerifyUntil = performance.now() + DEEP_VERIFY_WINDOW_MS;
+  const windowMs = DEEP_VERIFY_WINDOW_MS + runtime.buffs.deepVerifyWindowBonusMs;
+  runtime.deepVerifyUntil = performance.now() + windowMs;
+  if (runtime.buffs.deepVerifySpawnGenuine) {
+    const idleSlots = runtime.slots.filter((slot) => slot.state === "idle");
+    if (idleSlots.length) {
+      const slot = idleSlots[Math.floor(Math.random() * idleSlots.length)];
+      const timestamp = performance.now();
+      const lifespan = getSignalLifespanMs(clamp(timestamp - runtime.runStartAt, 0, RUN_DURATION_MS));
+      slot.kind = "genuine";
+      slot.state = "genuine";
+      slot.totalMs = lifespan;
+      slot.deadline = timestamp + lifespan;
+      updateSlotVisual(slot);
+    }
+  }
   setMoriState("deep-verify");
   audio.navigate(2);
   updateHud();
-  announce(`DEEP VERIFY를 켰습니다. ${(DEEP_VERIFY_WINDOW_MS / 1_000).toFixed(0)}초 동안 정화 점수가 2배, 오클릭 손실도 2배입니다.`);
+  announce(`DEEP VERIFY를 켰습니다. ${(windowMs / 1_000).toFixed(0)}초 동안 정화 점수가 2배, 오클릭 손실도 2배입니다.`);
 }
 
 function gameLoop(timestamp) {
@@ -816,6 +962,11 @@ function gameLoop(timestamp) {
   if (!runtime.locked) {
     const elapsedMs = clamp(timestamp - runtime.runStartAt, 0, RUN_DURATION_MS);
     const remainingMs = RUN_DURATION_MS - elapsedMs;
+
+    if (maybeTriggerBuffPick(elapsedMs)) {
+      runtime.animationFrame = window.requestAnimationFrame(gameLoop);
+      return;
+    }
 
     runtime.slots.forEach((slot) => {
       if (slot.state !== "fake" && slot.state !== "genuine") return;
@@ -835,10 +986,15 @@ function gameLoop(timestamp) {
       }
     });
 
+    const maxConcurrent = clamp(
+      getMaxConcurrentSignals(elapsedMs) + runtime.buffs.concurrentBonus,
+      1,
+      SLOT_COUNT,
+    );
     if (
       timestamp >= runtime.nextSpawnAt
       && runtime.slots.filter((slot) => slot.state === "fake" || slot.state === "genuine").length
-        < getMaxConcurrentSignals(elapsedMs)
+        < maxConcurrent
     ) {
       spawnRandomSignal(timestamp, elapsedMs);
       runtime.nextSpawnAt = timestamp + getSpawnIntervalMs(elapsedMs);
@@ -1030,6 +1186,17 @@ function handleGlobalKeydown(event) {
   }
   if (!runtime.ready) return;
 
+  if (runtime.mode === "play" && runtime.buffPickActive) {
+    if (event.key === "1" || event.key === "2") {
+      event.preventDefault();
+      if (!event.repeat) {
+        const buff = runtime.buffChoices[Number(event.key) - 1];
+        if (buff) chooseBuff(buff.id);
+      }
+    }
+    return;
+  }
+
   if (runtime.mode === "play" && !runtime.locked) {
     if (event.key.toLowerCase() === "d") {
       event.preventDefault();
@@ -1106,6 +1273,9 @@ elements.memoryButtons.forEach((button) => {
 elements.returnStartButton.addEventListener("click", () => startGame());
 elements.lensButton.addEventListener("click", useArchiveLens);
 elements.deepVerifyButton.addEventListener("click", toggleDeepVerifyWager);
+elements.buffCards.forEach((card) => {
+  card.addEventListener("click", () => chooseBuff(card.dataset.buffId));
+});
 elements.rememberButton.addEventListener("click", rememberResultAndRestart);
 elements.forgetButton.addEventListener("click", forgetAndReturn);
 elements.soundButton.addEventListener("click", () => {

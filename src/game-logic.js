@@ -10,6 +10,52 @@ export const WRONG_CLICK_LOSS_DEEP_VERIFY = 2;
 export const DEEP_VERIFY_WINDOW_MS = 5_000;
 export const LENS_BOOST_MS = 4_000;
 export const LENS_EXTEND_BONUS_MS = 700;
+export const BUFF_PICK_TRIGGERS_MS = [15_000, 30_000, 45_000];
+export const BUFF_CHOICES_PER_PICK = 2;
+
+// Each pick offers two of these and removes both from the pool, so a single
+// 60s run surfaces exactly three distinct trade-offs (6 buffs / 2 per pick).
+// None of these are pure power-ups — every one gives something and takes
+// something, so the choice itself is the point, not just "pick the biggest
+// number."
+export const BUFF_DEFINITIONS = [
+  {
+    id: "combo-focus",
+    name: "콤보 특화",
+    description: "콤보 보너스 +50%, 오클릭 시 코어 무결성 추가 -1",
+    effects: { comboScale: 0.5, wrongLossBonus: 1 },
+  },
+  {
+    id: "safe-hands",
+    name: "안전한 손",
+    description: "오클릭 코어 무결성 손실 -1(최소 1), 정화 점수 -10%",
+    effects: { wrongLossBonus: -1, scoreScale: -0.1 },
+  },
+  {
+    id: "slow-burn",
+    name: "여유 확보",
+    description: "신호 지속시간 +20%, 동시 등장 최대 개수 +1",
+    effects: { lifespanScale: 0.2, concurrentBonus: 1 },
+  },
+  {
+    id: "high-stakes",
+    name: "고위험 배팅",
+    description: "DEEP VERIFY 지속시간 +3초, 발동 시 진짜 신호 1개 즉시 추가 등장",
+    effects: { deepVerifyWindowBonusMs: 3_000, deepVerifySpawnGenuine: true },
+  },
+  {
+    id: "lens-mastery",
+    name: "렌즈 숙련",
+    description: "ARCHIVE LENS 충전 +1, 지속시간 -1초",
+    effects: { lensChargeBonus: 1, lensDurationBonusMs: -1_000 },
+  },
+  {
+    id: "core-plating",
+    name: "코어 보강",
+    description: "코어 무결성 즉시 1칸 회복, 콤보 보너스 -20%",
+    effects: { healIntegrity: 1, comboScale: -0.2 },
+  },
+];
 
 const SPAWN_INTERVAL_RANGE_MS = [900, 340];
 const SIGNAL_LIFESPAN_RANGE_MS = [1_450, 700];
@@ -148,14 +194,17 @@ export function pickSignalKind(random = Math.random) {
 // Speed rewards reacting close to spawn, combo rewards an unbroken run of
 // correct purges; a `multiplier` of 2 is how the DEEP VERIFY wager window
 // pays out, and costs double on a mistake via getWrongClickLoss.
-export function scorePurge(remainingRatio, combo, multiplier = 1) {
+export function scorePurge(remainingRatio, combo, multiplier = 1, modifiers = {}) {
+  const { comboScale = 0, scoreScale = 0 } = modifiers;
   const speedBonus = Math.round(clamp(remainingRatio, 0, 1) * 150);
-  const comboBonus = clamp(Math.floor(combo), 0, 12) * 20;
-  return Math.round((100 + speedBonus + comboBonus) * multiplier);
+  const comboBonus = Math.round(clamp(Math.floor(combo), 0, 12) * 20 * (1 + comboScale));
+  const base = Math.round((100 + speedBonus + comboBonus) * (1 + scoreScale));
+  return Math.round(base * multiplier);
 }
 
-export function getWrongClickLoss(deepVerify = false) {
-  return deepVerify ? WRONG_CLICK_LOSS_DEEP_VERIFY : WRONG_CLICK_LOSS;
+export function getWrongClickLoss(deepVerify = false, bonusLoss = 0) {
+  const base = deepVerify ? WRONG_CLICK_LOSS_DEEP_VERIFY : WRONG_CLICK_LOSS;
+  return Math.max(0, base + bonusLoss);
 }
 
 export function getRunDirective(runs = 0, fragments = 0) {
