@@ -1030,27 +1030,27 @@ kbd {
   display: flex;
   align-items: baseline;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 10px;
   max-width: 58ch;
   margin: 12px 0 0;
-  padding: 8px 12px;
+  padding: 10px 14px;
   border: 1px solid var(--line-strong);
   border-left: 3px solid var(--index-ink);
   border-radius: var(--radius-sm);
   background: color-mix(in srgb, var(--cyan-300) 7%, transparent);
-  color: var(--slate-200);
-  font-size: 0.86rem;
+  color: var(--slate-100);
+  font-size: 1.05rem;
   line-height: 1.5;
   transition: border-color 160ms ease, color 160ms ease;
 }
 
 .mori-dialogue > span:first-child {
   flex: none;
-  padding: 1px 6px;
+  padding: 2px 7px;
   border-radius: 3px;
   background: color-mix(in srgb, var(--cyan-300) 20%, transparent);
   color: var(--cyan-300);
-  font: 700 0.62rem/1.5 "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  font: 700 0.72rem/1.5 "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
   letter-spacing: 0.09em;
 }
 
@@ -1983,11 +1983,13 @@ kbd {
   right: -4px;
   bottom: -4px;
   z-index: 1;
-  padding: 1px 4px;
+  padding: 2px 5px;
+  border: 1px solid var(--line-strong);
   border-radius: 3px;
-  color: var(--slate-500);
-  background: var(--slate-950);
-  font-size: 0.6rem;
+  color: var(--slate-100);
+  background: var(--slate-900);
+  font-weight: 700;
+  font-size: 0.78rem;
 }
 
 .signal-slot[data-state="fake"] {
