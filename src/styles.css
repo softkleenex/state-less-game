@@ -251,7 +251,7 @@ summary:focus-visible {
 
 .page-shell[data-mode="play"] .game-panel,
 .page-shell[data-mode="result"] .game-panel {
-  width: min(100%, 1120px);
+  width: min(100%, 1320px);
   justify-self: center;
 }
 
@@ -1481,7 +1481,7 @@ kbd {
 
 .signal-field {
   position: relative;
-  height: 280px;
+  height: clamp(280px, 46vh, 480px);
   margin-top: 10px;
   overflow: hidden;
   border: 1px solid var(--line);
