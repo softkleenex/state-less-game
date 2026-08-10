@@ -547,6 +547,35 @@ export function getAdaptiveDifficultyScale(meter) {
   return 1 - (clamped / ADAPTIVE_METER_RANGE) * ADAPTIVE_DIFFICULTY_STRENGTH;
 }
 
+export function getDayIndex(timestampMs = Date.now()) {
+  return Math.floor(timestampMs / 86_400_000);
+}
+
+// A "streak" counts consecutive calendar days with at least one visit, not
+// sessions — reloading or replaying within the same day doesn't inflate it
+// (the day you're already on just holds), skipping a day resets it to 1
+// rather than 0 (today's visit still counts as day one of a new streak), and
+// any clock-skew weirdness (a stored day in the future) also falls through
+// to the reset branch rather than trusting a value that can't be verified.
+export function computeStreak(previousStreak, lastPlayDay, todayDayIndex) {
+  const safePrevious = clamp(Math.floor(Number(previousStreak) || 0), 0, 999);
+  const safeLastPlayDay = Math.floor(Number(lastPlayDay) || 0);
+  if (safeLastPlayDay === todayDayIndex) return Math.max(1, safePrevious);
+  if (safeLastPlayDay === todayDayIndex - 1) return safePrevious + 1;
+  return 1;
+}
+
+const STREAK_REMARKS = [
+  { min: 7, remark: (streak) => `${streak}일 연속으로 왔네. 이 정도면 거의 상주야.` },
+  { min: 3, remark: (streak) => `${streak}일 연속이야. 꾸준하네.` },
+  { min: 2, remark: () => "이틀 연속이네. 나쁘지 않아." },
+];
+
+export function getStreakRemark(streak) {
+  const tier = STREAK_REMARKS.find(({ min }) => streak >= min);
+  return tier ? tier.remark(streak) : "";
+}
+
 export function pickSignalKind(random = Math.random, genuineChance = GENUINE_CHANCE) {
   return random() < genuineChance ? "genuine" : "fake";
 }

@@ -16,10 +16,12 @@ import {
   WRONG_CLICK_LOSS,
   WRONG_CLICK_LOSS_DEEP_VERIFY,
   awardMemoryFragment,
+  computeStreak,
   createRandom,
   getAdaptiveDifficultyScale,
   getArchiveLensCharges,
   getBuffPickTriggers,
+  getDayIndex,
   getFragmentReward,
   getMaxConcurrentSignals,
   getMoriArchiveRecord,
@@ -30,6 +32,7 @@ import {
   getRunStyleTag,
   getSignalLifespanMs,
   getSpawnIntervalMs,
+  getStreakRemark,
   getUnlockedBuffDefinitions,
   getWrongClickLoss,
   pickSignalKind,
@@ -244,32 +247,54 @@ test("memory encoding round-trips only the allowed game fields", () => {
     lastEnding: "verified",
     policy: "persistent",
     fragments: 4,
+    streak: 5,
+    lastPlayDay: 20_123,
     injected: "not stored",
   };
   assert.deepEqual(decodeMemory(encodeMemory(memory)), {
-    version: 2,
+    version: 3,
     visits: 4,
     runs: 3,
     bestScore: 5_880,
     lastEnding: "verified",
     policy: "persistent",
     fragments: 4,
+    streak: 5,
+    lastPlayDay: 20_123,
   });
 });
 
 test("legacy memories migrate safely and memory fragments stop at the collection cap", () => {
   assert.deepEqual(sanitizeMemory({ version: 1, visits: 2, bestScore: 900 }), {
-    version: 2,
+    version: 3,
     visits: 2,
     runs: 0,
     bestScore: 900,
     lastEnding: null,
     policy: null,
     fragments: 0,
+    streak: 0,
+    lastPlayDay: 0,
   });
   assert.equal(awardMemoryFragment(0), 1);
   assert.equal(awardMemoryFragment(MAX_MEMORY_FRAGMENTS), MAX_MEMORY_FRAGMENTS);
   assert.equal(awardMemoryFragment(999), MAX_MEMORY_FRAGMENTS);
+});
+
+test("play streak holds within a day, grows on the next consecutive day, and resets after a gap", () => {
+  const today = getDayIndex(1_700_000_000_000);
+  assert.equal(computeStreak(0, 0, today), 1, "brand-new memory starts a streak of 1");
+  assert.equal(computeStreak(3, today, today), 3, "replaying the same day does not inflate the streak");
+  assert.equal(computeStreak(3, today - 1, today), 4, "the very next calendar day extends the streak");
+  assert.equal(computeStreak(9, today - 2, today), 1, "skipping a day resets the streak to 1, not 0");
+  assert.equal(computeStreak(9, today + 5, today), 1, "a stored day in the future is untrusted and resets the streak");
+});
+
+test("streak remarks only appear at meaningful milestones", () => {
+  assert.equal(getStreakRemark(1), "");
+  assert.equal(getStreakRemark(2), "이틀 연속이네. 나쁘지 않아.");
+  assert.ok(getStreakRemark(3).includes("3"));
+  assert.ok(getStreakRemark(10).includes("10"));
 });
 
 test("archive lens charges grow with recovered fragments and stop at three", () => {

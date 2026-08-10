@@ -16,10 +16,12 @@ import {
   RUN_DURATION_MS,
   SLOT_COUNT,
   clamp,
+  computeStreak,
   formatScore,
   getAdaptiveDifficultyScale,
   getArchiveLensCharges,
   getBuffPickTriggers,
+  getDayIndex,
   getFragmentReward,
   getMaxConcurrentSignals,
   getMoriArchiveRecord,
@@ -30,6 +32,7 @@ import {
   getRunStyleTag,
   getSignalLifespanMs,
   getSpawnIntervalMs,
+  getStreakRemark,
   getUnlockedBuffDefinitions,
   getWrongClickLoss,
   pickSignalKind,
@@ -81,6 +84,7 @@ const elements = {
   returnStartLabel: element("return-start-label"),
   memoryButtons: [...document.querySelectorAll("[data-memory-policy]")],
   telemetryVisit: element("telemetry-visit"),
+  telemetryStreak: element("telemetry-streak"),
   telemetryFragments: element("telemetry-fragments"),
   telemetryRuns: element("telemetry-runs"),
   telemetryBest: element("telemetry-best"),
@@ -122,6 +126,7 @@ const elements = {
   resultHeading: element("result-heading"),
   resultMessage: element("result-message"),
   resultRecap: element("result-recap"),
+  resultBuild: element("result-build"),
   resultDirective: element("result-directive"),
   resultDirectiveCopy: element("result-directive-copy"),
   resultScore: element("result-score"),
@@ -423,6 +428,7 @@ function updateTelemetry() {
   elements.telemetryVisit.textContent = firstVisit
     ? "01 / FIRST"
     : `${String(runtime.memory.visits).padStart(2, "0")} / RETURN`;
+  elements.telemetryStreak.textContent = `${String(runtime.memory.streak).padStart(2, "0")}일 연속`;
   elements.telemetryFragments.textContent = `${String(fragments).padStart(2, "0")} / ${String(MAX_MEMORY_FRAGMENTS).padStart(2, "0")}`;
   elements.telemetryRuns.textContent = String(runtime.memory.runs).padStart(2, "0");
   elements.telemetryBest.textContent = formatScore(runtime.memory.bestScore);
@@ -507,11 +513,14 @@ function renderIntro(messageOverride = "") {
     `이번 런 MORI REQUEST. ${directive.label}. 완료 보너스 ${directive.bonus}점.`,
   );
 
+  const streakRemark = getStreakRemark(runtime.memory.streak);
+  const streakSuffix = streakRemark ? ` ${streakRemark}` : "";
+
   if (returning && archiveComplete) {
     speakIntroLines(
       "여섯 파일 다 기억하고 있어.",
       `${runtime.memory.runs}번 방어한 기록이랑 최고 점수 ${formatScore(runtime.memory.bestScore)}가 남아 있어. `
-        + `ARCHIVE LENS ${lensCharges}회로 다시 도전해봐.`,
+        + `ARCHIVE LENS ${lensCharges}회로 다시 도전해봐.${streakSuffix}`,
     );
     elements.terminalStatus.textContent = "ARCHIVE COMPLETE";
     updateMemoryRoute("ledger/archive-complete");
@@ -520,9 +529,10 @@ function renderIntro(messageOverride = "") {
     const ending = runtime.memory.lastEnding;
     speakIntroLines(
       `돌아왔네. ${runtime.memory.visits}번째야.`,
-      ending
+      (ending
         ? `기억 조각은 ${runtime.memory.fragments}/${MAX_MEMORY_FRAGMENTS}, 저번 결말은 ${ending.toUpperCase()}, 최고 점수는 ${formatScore(runtime.memory.bestScore)}로 남겨놨어. 이번엔 ARCHIVE LENS ${lensCharges}회 줄게.`
-        : `네 방문 기록이랑 기억 조각 ${runtime.memory.fragments}/${MAX_MEMORY_FRAGMENTS}은 찾아놨어. ARCHIVE LENS ${lensCharges}회로 다음 파일을 열어봐.`,
+        : `네 방문 기록이랑 기억 조각 ${runtime.memory.fragments}/${MAX_MEMORY_FRAGMENTS}은 찾아놨어. ARCHIVE LENS ${lensCharges}회로 다음 파일을 열어봐.`)
+        + streakSuffix,
     );
     elements.terminalStatus.textContent = "MEMORY FOUND";
     updateMemoryRoute(`ledger/visit-${String(runtime.memory.visits).padStart(2, "0")}`);
@@ -718,6 +728,7 @@ function updateHud() {
   });
   elements.integrityPips.setAttribute("aria-label", `코어 무결성 ${runtime.integrity} / ${MAX_INTEGRITY}`);
   elements.coreOrb.dataset.integrity = String(runtime.integrity);
+  elements.screenStack.dataset.danger = String(runtime.integrity === 1);
 
   const comboBonus = clamp(runtime.combo, 0, 12) * 20;
   elements.syncValue.textContent = runtime.combo > 12 ? "×12+" : `×${runtime.combo}`;
@@ -1385,6 +1396,28 @@ function renderResultRecap() {
     : `가장 아쉬웠던 순간: ${minutes}:${seconds}, ${cause}.`;
 }
 
+// With no cap on stacking, "what did this run's build even look like" stops
+// being obvious mid-run just from the orbit ring, so the result screen gets
+// a plain-text recap in pick order — the same buffCounts/buffPickOrder the
+// HUD orbit already tracks, just read once at the end instead of live.
+function renderResultBuild() {
+  if (!runtime.buffPickOrder.length) {
+    elements.resultBuild.hidden = true;
+    elements.resultBuild.textContent = "";
+    return;
+  }
+  const summary = runtime.buffPickOrder
+    .map((id) => {
+      const definition = BUFF_DEFINITIONS.find((buff) => buff.id === id);
+      const count = runtime.buffCounts[id] ?? 0;
+      const name = definition?.name ?? id;
+      return count > 1 ? `${name} ×${count}` : name;
+    })
+    .join(" · ");
+  elements.resultBuild.hidden = false;
+  elements.resultBuild.textContent = `이번 런 빌드: ${summary}`;
+}
+
 function renderResultArchive(foundNewFragment) {
   const archiveComplete = runtime.pendingFragments >= MAX_MEMORY_FRAGMENTS;
   const record = foundNewFragment
@@ -1483,6 +1516,7 @@ async function finishRun() {
     elements.resultMessage.textContent = `${result.message} 이번 런에서는 새 기억 조각을 얻지 못했습니다.`;
   }
   renderResultRecap();
+  renderResultBuild();
   animateScoreCountUp(runtime.score);
   elements.resultRank.textContent = result.rank;
   elements.resultTruth.textContent = String(runtime.purges);
@@ -1638,10 +1672,13 @@ async function initialize() {
   const loaded = await loadMemory();
   runtime.adapter = loaded.adapter;
   runtime.memoryFound = loaded.found;
+  const todayDayIndex = getDayIndex();
   runtime.memory = {
     ...loaded.memory,
     visits: loaded.memory.visits + 1,
     policy: loaded.found ? loaded.memory.policy ?? "session" : null,
+    streak: computeStreak(loaded.memory.streak, loaded.memory.lastPlayDay, todayDayIndex),
+    lastPlayDay: todayDayIndex,
   };
 
   if (loaded.found) {
