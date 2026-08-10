@@ -7,6 +7,7 @@ artifacts/*.mp4
 
 # 개인 이력·제출 관리용 파일 (게임 저장소에는 불필요)
 /제출_체크리스트.md
+/영상녹화_계획.md
 /docs/포트폴리오_NHN2026.md
 /docs/포트폴리오_NHN2026.pdf
 /docs/portfolio-assets/
