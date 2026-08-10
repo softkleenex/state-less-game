@@ -761,19 +761,19 @@ summary:focus-visible {
 
 .mission-directive > span {
   color: var(--cyan-300);
-  font: 700 0.55rem/1 "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  font: 700 0.65rem/1 "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
   letter-spacing: 0.1em;
 }
 
 .mission-directive strong {
-  color: var(--slate-200);
-  font-size: 0.68rem;
+  color: var(--slate-100);
+  font-size: 0.78rem;
 }
 
 .mission-directive small {
   margin-left: auto;
   color: var(--amber-300);
-  font: 700 0.58rem/1 "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  font: 700 0.68rem/1 "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
 }
 
 .mission-brief[data-state="complete"] {
@@ -873,7 +873,7 @@ summary:focus-visible {
 
 .archive-log li span {
   color: var(--cyan-300);
-  font: 700 0.57rem/1 "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  font: 700 0.66rem/1 "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
   letter-spacing: 0.08em;
 }
 
@@ -929,7 +929,8 @@ summary:focus-visible {
 .choice-index {
   color: var(--accent);
   font-family: "JetBrains Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
-  font-size: 0.67rem;
+  font-size: 0.78rem;
+  font-weight: 700;
 }
 
 .choice-button strong {
@@ -985,18 +986,19 @@ summary:focus-visible {
 }
 
 kbd {
-  min-width: 24px;
+  min-width: 26px;
   display: inline-grid;
-  min-height: 23px;
+  min-height: 25px;
   place-items: center;
   padding: 2px 6px;
   border: 1px solid var(--slate-700);
   border-bottom-width: 2px;
   border-radius: 6px;
-  color: var(--slate-300, var(--slate-200));
+  color: var(--slate-100);
   background: var(--slate-900);
   font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
-  font-size: 0.65rem;
+  font-weight: 700;
+  font-size: 0.74rem;
 }
 
 .game-screen {
@@ -1582,9 +1584,9 @@ kbd {
 }
 
 .buff-card-desc {
-  color: var(--slate-300);
-  font-size: 0.72rem;
-  line-height: 1.4;
+  color: var(--slate-200);
+  font-size: 0.82rem;
+  line-height: 1.45;
 }
 
 .tutorial-overlay {
@@ -1710,7 +1712,7 @@ kbd {
   position: relative;
   z-index: 1;
   color: var(--accent);
-  font: 700 0.6rem/1 "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  font: 700 0.7rem/1 "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
   letter-spacing: 0.1em;
 }
 
@@ -2064,7 +2066,7 @@ kbd {
 .zone-score-pop.is-clutch {
   top: -20px;
   color: var(--warm);
-  font-size: 0.66rem;
+  font-size: 0.74rem;
   letter-spacing: 0.06em;
 }
 
@@ -2080,8 +2082,8 @@ kbd {
   justify-content: space-between;
   gap: 18px;
   margin-top: 11px;
-  color: var(--slate-500);
-  font-size: 0.68rem;
+  color: var(--slate-400);
+  font-size: 0.76rem;
 }
 
 .board-footer p {
@@ -2092,9 +2094,9 @@ kbd {
   min-width: 0;
   max-width: 62%;
   overflow: hidden;
-  color: var(--slate-500);
+  color: var(--slate-300);
   font-family: "JetBrains Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
-  font-size: 0.58rem;
+  font-size: 0.68rem;
   letter-spacing: 0.07em;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2234,8 +2236,8 @@ kbd {
   align-items: center;
   justify-content: space-between;
   gap: 8px 14px;
-  color: var(--slate-500);
-  font: 700 0.58rem/1 "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  color: var(--slate-400);
+  font: 700 0.68rem/1 "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
   letter-spacing: 0.1em;
 }
 
