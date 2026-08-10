@@ -348,9 +348,9 @@ summary:focus-visible {
 
 .telemetry-row dt,
 .result-stats dt {
-  color: var(--slate-500);
+  color: var(--slate-400);
   font-family: "JetBrains Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
-  font-size: 0.62rem;
+  font-size: 0.68rem;
   font-weight: 700;
   letter-spacing: 0.14em;
 }
@@ -1100,7 +1100,7 @@ kbd {
 
 .mori-state-chip {
   min-width: 184px;
-  height: 64px;
+  min-height: 64px;
   display: grid;
   grid-template-columns: 50px 1fr;
   align-items: center;
@@ -1138,14 +1138,14 @@ kbd {
 }
 
 .mori-state-chip small {
-  color: var(--slate-500);
-  font-size: 0.48rem;
+  color: var(--slate-400);
+  font-size: 0.58rem;
   letter-spacing: 0.1em;
 }
 
 .mori-state-chip strong {
   overflow: hidden;
-  font-size: 0.56rem;
+  font-size: 0.7rem;
   letter-spacing: 0.06em;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1169,8 +1169,8 @@ kbd {
 
 .round-time-block span,
 .score-block span {
-  color: var(--slate-500);
-  font-size: 0.61rem;
+  color: var(--slate-400);
+  font-size: 0.7rem;
   letter-spacing: 0.14em;
 }
 
@@ -1245,8 +1245,8 @@ kbd {
 
 .sync-status span,
 .sync-status small {
-  color: var(--slate-500);
-  font-size: 0.5rem;
+  color: var(--slate-400);
+  font-size: 0.6rem;
   letter-spacing: 0.1em;
 }
 
@@ -1258,8 +1258,8 @@ kbd {
 .sync-status strong {
   grid-row: 1 / 3;
   grid-column: 2;
-  color: var(--slate-400);
-  font-size: 0.82rem;
+  color: var(--slate-300);
+  font-size: 0.92rem;
   font-variant-numeric: tabular-nums;
   letter-spacing: 0;
 }
@@ -1331,8 +1331,8 @@ kbd {
 
 .lens-copy small {
   overflow: hidden;
-  color: var(--slate-500);
-  font-size: 0.48rem;
+  color: var(--slate-400);
+  font-size: 0.58rem;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1340,7 +1340,7 @@ kbd {
 .lens-copy strong {
   overflow: hidden;
   color: var(--cyan-300);
-  font-size: 0.54rem;
+  font-size: 0.68rem;
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.03em;
   text-overflow: ellipsis;
@@ -1417,14 +1417,14 @@ kbd {
 }
 
 .deep-verify-copy small {
-  color: var(--slate-500);
-  font-size: 0.49rem;
+  color: var(--slate-400);
+  font-size: 0.58rem;
   letter-spacing: 0.1em;
 }
 
 .deep-verify-copy strong {
-  color: var(--slate-400);
-  font-size: 0.6rem;
+  color: var(--slate-300);
+  font-size: 0.7rem;
   letter-spacing: 0.035em;
 }
 
@@ -1481,8 +1481,8 @@ kbd {
 .wave-progress {
   display: block;
   margin-top: 14px;
-  color: var(--slate-400);
-  font: 700 0.68rem/1.4 "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  color: var(--slate-300);
+  font: 700 0.76rem/1.4 "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
   letter-spacing: 0.04em;
 }
 
@@ -1491,7 +1491,7 @@ kbd {
   margin-top: 4px;
   min-height: 1.2em;
   color: var(--amber-300);
-  font: 700 0.62rem/1.4 "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  font: 700 0.7rem/1.4 "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
   letter-spacing: 0.05em;
 }
 
@@ -1500,7 +1500,7 @@ kbd {
   margin-top: 2px;
   min-height: 1.1em;
   color: var(--success);
-  font: 700 0.6rem/1.4 "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  font: 700 0.68rem/1.4 "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
   letter-spacing: 0.05em;
 }
 
