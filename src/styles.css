@@ -316,6 +316,13 @@ summary:focus-visible {
   background: var(--line);
 }
 
+/* Seven telemetry rows in a two-column grid leaves the last cell empty,
+   which otherwise shows up as a blank panel-colored box with nothing in it
+   — span the odd one out across both columns instead. */
+.telemetry-row:last-child {
+  grid-column: 1 / -1;
+}
+
 .telemetry-row {
   position: relative;
   min-height: 62px;
@@ -532,12 +539,12 @@ summary:focus-visible {
 }
 
 .screen-stack[data-screen="intro"] .mori-presence {
-  opacity: 0.76;
+  opacity: 0.92;
   transform: translateX(0);
 }
 
 .screen-stack[data-screen="result"] .mori-presence {
-  opacity: 0.64;
+  opacity: 0.82;
   transform: translateX(0);
 }
 
@@ -571,7 +578,7 @@ summary:focus-visible {
   height: 100%;
   object-fit: contain;
   object-position: center bottom;
-  filter: grayscale(0.38) saturate(0.72) contrast(1.12) drop-shadow(0 18px 28px rgb(0 0 0 / 38%));
+  filter: grayscale(0.2) saturate(0.9) contrast(1.08) brightness(1.08) drop-shadow(0 18px 28px rgb(0 0 0 / 38%));
   mask-image: linear-gradient(to bottom, black 82%, transparent 100%);
 }
 
