@@ -142,6 +142,8 @@ Vite의 `base`를 상대 경로로 설정했으므로 사용자/프로젝트 Pag
 
 ## 라이선스와 에셋
 
+이 저장소의 소스 코드는 [MIT License](LICENSE)로 배포합니다. 아래 항목은 코드가 아닌 개별 에셋의 출처·라이선스입니다.
+
 - Vite: MIT License, 빌드 도구로만 사용
 - Pandoc: GPL-2.0-or-later, 제출용 PDF 생성 시 마크다운 변환에만 사용(게임 실행에는 사용하지 않음)
 - MORI 기본 이미지: ChatGPT Image로 생성한 PNG를 WebP로 최적화해 사용하며, 프롬프트와 선택 과정은 `캐릭터/`에 기록
